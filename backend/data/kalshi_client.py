@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -24,14 +25,21 @@ class KalshiClient:
         self._private_key = None
 
     def _load_private_key(self):
-        """Load RSA private key from file (lazy, cached)."""
+        """Load RSA private key — from base64 env var (Railway) or file path fallback."""
         if self._private_key is not None:
             return self._private_key
 
+        # Try base64 env var first (for Railway/cloud deployment)
+        key_b64 = os.getenv("KALSHI_PRIVATE_KEY_B64")
+        if key_b64:
+            pem_data = base64.b64decode(key_b64)
+            self._private_key = serialization.load_pem_private_key(pem_data, password=None)
+            return self._private_key
+
+        # Fall back to file path
         key_path = settings.KALSHI_PRIVATE_KEY_PATH
         if not key_path:
-            raise ValueError("KALSHI_PRIVATE_KEY_PATH not configured")
-
+            raise ValueError("No Kalshi private key configured")
         pem_data = Path(key_path).expanduser().read_bytes()
         self._private_key = serialization.load_pem_private_key(pem_data, password=None)
         return self._private_key
