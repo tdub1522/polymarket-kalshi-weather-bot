@@ -3,7 +3,8 @@ import asyncio
 from typing import Any
 
 import httpx
-from loguru import logger
+import logging
+logger = logging.getLogger("trading_bot")
 
 from backend.config import settings
 
