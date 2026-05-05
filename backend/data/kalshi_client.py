@@ -86,7 +86,9 @@ class KalshiClient:
 
     async def get_market(self, ticker: str) -> dict:
         """Fetch a single market by ticker."""
-        return await self.get(f"/markets/{ticker}")
+        data = await self.get(f"/markets/{ticker}")
+        logger.info(f"Kalshi market detail raw response for {ticker}: {data}")
+        return data
 
     async def get_balance(self) -> dict:
         """Get portfolio balance (useful for auth test)."""

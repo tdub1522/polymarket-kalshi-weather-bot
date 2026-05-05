@@ -2,7 +2,7 @@
 import httpx
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Optional
 import statistics
 import time
@@ -51,6 +51,30 @@ CITY_CONFIG: Dict[str, dict] = {
         "nws_office": "BOU",
         "nws_gridpoint": "BOU/62,60",
     },
+    "boston": {
+        "name": "Boston",
+        "lat": 42.3601,
+        "lon": -71.0589,
+        "nws_station": "KBOS",
+        "nws_office": "BOX",
+        "nws_gridpoint": "BOX/71,90",
+    },
+    "philadelphia": {
+        "name": "Philadelphia",
+        "lat": 39.9526,
+        "lon": -75.1652,
+        "nws_station": "KPHL",
+        "nws_office": "PHI",
+        "nws_gridpoint": "PHI/49,37",
+    },
+    "atlanta": {
+        "name": "Atlanta",
+        "lat": 33.7490,
+        "lon": -84.3880,
+        "nws_station": "KATL",
+        "nws_office": "FFC",
+        "nws_gridpoint": "FFC/52,41",
+    },
 }
 
 
@@ -67,16 +91,11 @@ class EnsembleForecast:
     mean_low: float = 0.0
     std_low: float = 0.0
     num_members: int = 0
-    fetched_at: datetime = field(default_factory=datetime.utcnow)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self):
         if self.member_highs:
-            self.mean_high = statistics.mean(self.member_highs)
-            self.std_high = statistics.stdev(self.member_highs) if len(self.member_highs) > 1 else 0.0
             self.num_members = len(self.member_highs)
-        if self.member_lows:
-            self.mean_low = statistics.mean(self.member_lows)
-            self.std_low = statistics.stdev(self.member_lows) if len(self.member_lows) > 1 else 0.0
 
     def probability_high_above(self, threshold_f: float) -> float:
         """Fraction of ensemble members with daily high above threshold."""
@@ -180,9 +199,25 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
                 elif "temperature_2m_min" in key:
                     member_lows.append(float(val))
 
+            logger.info(f"Sample member highs for {city_key}: {member_highs[:5]}")
+
             if not member_highs:
                 logger.warning(f"No ensemble data for {city_key} on {target_date}")
                 return None
+
+            initial_mean_high = statistics.mean(member_highs)
+            initial_std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
+            filtered_highs = [m for m in member_highs if abs(m - initial_mean_high) <= 2 * initial_std_high]
+            mean_high = statistics.mean(filtered_highs)
+            std_high = statistics.stdev(filtered_highs) if len(filtered_highs) > 1 else 0.0
+            logger.info(f"High temp filtering: {len(filtered_highs)}/{len(member_highs)} members within 2 std")
+
+            initial_mean_low = statistics.mean(member_lows) if member_lows else 0.0
+            initial_std_low = statistics.stdev(member_lows) if len(member_lows) > 1 else 0.0
+            filtered_lows = [m for m in member_lows if abs(m - initial_mean_low) <= 2 * initial_std_low] if member_lows else []
+            mean_low = statistics.mean(filtered_lows) if filtered_lows else 0.0
+            std_low = statistics.stdev(filtered_lows) if len(filtered_lows) > 1 else 0.0
+            logger.info(f"Low temp filtering: {len(filtered_lows)}/{len(member_lows)} members within 2 std")
 
             forecast = EnsembleForecast(
                 city_key=city_key,
@@ -190,6 +225,10 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
                 target_date=target_date,
                 member_highs=member_highs,
                 member_lows=member_lows,
+                mean_high=mean_high,
+                std_high=std_high,
+                mean_low=mean_low,
+                std_low=std_low,
             )
 
             _forecast_cache[cache_key] = (now, forecast)

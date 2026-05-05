@@ -1,7 +1,9 @@
 """Kalshi weather temperature market fetcher."""
+import asyncio
 import logging
 import re
-from datetime import date, datetime
+import time
+from datetime import date, datetime, timezone
 from typing import Dict, List, Optional
 
 from backend.data.kalshi_client import KalshiClient, kalshi_credentials_present
@@ -16,6 +18,9 @@ CITY_SERIES: Dict[str, str] = {
     "miami": "KXHIGHMIA",
     "los_angeles": "KXHIGHLAX",
     "denver": "KXHIGHDEN",
+    "boston": "KXHIGHBOS",
+    "philadelphia": "KXHIGHPHIL",
+    "atlanta": "KXHIGHATL",
 }
 
 CITY_NAMES: Dict[str, str] = {
@@ -24,6 +29,9 @@ CITY_NAMES: Dict[str, str] = {
     "miami": "Miami",
     "los_angeles": "Los Angeles",
     "denver": "Denver",
+    "boston": "Boston",
+    "philadelphia": "Philadelphia",
+    "atlanta": "Atlanta",
 }
 
 # Month abbreviation mapping for ticker parsing
@@ -33,7 +41,7 @@ MONTH_ABBR = {
 }
 
 
-def _parse_kalshi_ticker(ticker: str, city_key: str) -> Optional[dict]:
+def _parse_kalshi_ticker(ticker: str) -> Optional[dict]:
     """
     Parse a Kalshi bracket ticker into market parameters.
 
@@ -77,6 +85,43 @@ def _parse_kalshi_ticker(ticker: str, city_key: str) -> Optional[dict]:
     }
 
 
+async def _fetch_market_detail(
+    client: KalshiClient, ticker: str
+) -> tuple[float, float, float]:
+    """
+    Fetch individual market detail for accurate bid/ask prices and volume.
+    Returns (yes_price, no_price, volume). Falls back to (0.5, 0.5, 0.0) on error or timeout.
+    """
+    try:
+        data = await asyncio.wait_for(client.get_market(ticker), timeout=5.0)
+        m = data.get("market", {})
+
+        yes_price = float(m.get("yes_ask_dollars") or 0)
+        no_price = float(m.get("no_ask_dollars") or 0)
+
+        # Fall back to bid if ask is missing
+        if yes_price <= 0:
+            yes_price = float(m.get("yes_bid_dollars") or 0)
+        if no_price <= 0:
+            no_price = float(m.get("no_bid_dollars") or 0)
+
+        # Final fallback
+        if yes_price <= 0:
+            yes_price = 0.5
+        if no_price <= 0:
+            no_price = 0.5
+
+        volume = float(m.get("volume_fp") or 0)
+        return yes_price, no_price, volume
+
+    except asyncio.TimeoutError:
+        logger.info(f"PRICE FETCH TIMEOUT for {ticker} (>5s)")
+        return 0.5, 0.5, 0.0
+    except Exception as e:
+        logger.info(f"PRICE FETCH ERROR for {ticker}: {type(e).__name__}: {e}")
+        return 0.5, 0.5, 0.0
+
+
 async def fetch_kalshi_weather_markets(
     city_keys: Optional[List[str]] = None,
 ) -> List[WeatherMarket]:
@@ -94,6 +139,9 @@ async def fetch_kalshi_weather_markets(
     today = date.today()
 
     cities = city_keys or list(CITY_SERIES.keys())
+
+    # Phase 1: collect candidates across all cities (no price fetching yet)
+    candidates = []  # list of dicts: ticker, city_key, city_name, parsed, raw title
 
     for city_key in cities:
         series = CITY_SERIES.get(city_key)
@@ -118,51 +166,80 @@ async def fetch_kalshi_weather_markets(
 
                 for m in raw_markets:
                     ticker = m.get("ticker", "")
-                    parsed = _parse_kalshi_ticker(ticker, city_key)
+                    parsed = _parse_kalshi_ticker(ticker)
                     if not parsed:
                         continue
 
                     if parsed["target_date"] < today:
                         continue
 
-                    yes_price = (m.get("yes_ask") or 0) / 100.0
-                    no_price = (m.get("no_ask") or 0) / 100.0
+                    logger.info("Close time filter disabled for debugging")
+                    # close_time_str = m.get("close_time", "")
+                    # if close_time_str:
+                    #     close_time = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
+                    #     now = datetime.now(timezone.utc)
+                    #     hours_until_close = (close_time - now).total_seconds() / 3600
+                    #     if hours_until_close > 24 or hours_until_close < 0:
+                    #         continue
+                    #     logger.info(f"{ticker} closes in {hours_until_close:.1f}h")
 
-                    # Fallback to last/mid prices
-                    if yes_price <= 0:
-                        yes_price = (m.get("last_price") or 50) / 100.0
-                    if no_price <= 0:
-                        no_price = 1.0 - yes_price
+                    candidates.append({
+                        "ticker": ticker,
+                        "city_key": city_key,
+                        "city_name": city_name,
+                        "parsed": parsed,
+                        "title": m.get("title", ticker),
+                    })
 
-                    # Skip fully resolved or illiquid
-                    if yes_price > 0.98 or yes_price < 0.02:
-                        continue
-
-                    volume = float(m.get("volume", 0) or 0)
-
-                    markets.append(WeatherMarket(
-                        slug=ticker,
-                        market_id=ticker,
-                        platform="kalshi",
-                        title=m.get("title", ticker),
-                        city_key=city_key,
-                        city_name=city_name,
-                        target_date=parsed["target_date"],
-                        threshold_f=parsed["threshold_f"],
-                        metric=parsed["metric"],
-                        direction=parsed["direction"],
-                        yes_price=yes_price,
-                        no_price=no_price,
-                        volume=volume,
-                    ))
-
-                # Handle pagination
                 cursor = data.get("cursor")
                 if not cursor or not raw_markets:
                     break
 
         except Exception as e:
             logger.warning(f"Failed to fetch Kalshi markets for {city_key} ({series}): {e}")
+
+    # Phase 2: fetch prices concurrently with semaphore
+    semaphore = asyncio.Semaphore(5)
+
+    async def fetch_with_semaphore(ticker: str) -> tuple[float, float, float]:
+        async with semaphore:
+            return await _fetch_market_detail(client, ticker)
+
+    t0 = time.monotonic()
+    price_results = await asyncio.gather(*[fetch_with_semaphore(c["ticker"]) for c in candidates])
+    elapsed = time.monotonic() - t0
+    logger.info(f"Fetched {len(candidates)} market prices in {elapsed:.1f}s")
+
+    # Phase 3: apply price filters and build WeatherMarket objects
+    for candidate, (yes_price, no_price, volume) in zip(candidates, price_results):
+        ticker = candidate["ticker"]
+
+        # Skip resolved or illiquid markets
+        if yes_price > 0.95 or yes_price < 0.05 or no_price > 0.95 or no_price < 0.05:
+            logger.debug(f"Skipping {ticker} — price out of range: YES {yes_price:.0%} / NO {no_price:.0%}")
+            continue
+
+        # Only keep validated YES price sweet spot (5–30 cents)
+        if yes_price > 0.30:
+            logger.debug(f"Skipping {ticker} — YES {yes_price:.0%} above 30c sweet spot")
+            continue
+
+        parsed = candidate["parsed"]
+        markets.append(WeatherMarket(
+            slug=ticker,
+            market_id=ticker,
+            platform="kalshi",
+            title=candidate["title"],
+            city_key=candidate["city_key"],
+            city_name=candidate["city_name"],
+            target_date=parsed["target_date"],
+            threshold_f=parsed["threshold_f"],
+            metric=parsed["metric"],
+            direction=parsed["direction"],
+            yes_price=yes_price,
+            no_price=no_price,
+            volume=volume,
+        ))
 
     logger.info(f"Found {len(markets)} Kalshi weather markets")
     return markets
