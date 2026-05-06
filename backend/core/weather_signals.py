@@ -13,6 +13,34 @@ from backend.models.database import SessionLocal, Signal
 
 logger = logging.getLogger("trading_bot")
 
+# Historical win rates keyed by (signal_type, no_price_cents_bucket)
+HISTORICAL_WIN_RATES = {
+    "T-above": {
+        (85, 99): 0.994,
+        (70, 84): 0.899,
+        (55, 69): 0.688,
+    },
+    "B-above": {
+        (85, 99): 0.990,
+        (70, 84): 0.916,
+        (55, 69): 0.850,
+    },
+    "B-below": {
+        (85, 99): 0.990,
+        (70, 84): 0.918,
+        (55, 69): 0.897,
+    },
+}
+
+
+def get_historical_win_rate(signal_type: str, no_price: float) -> float:
+    no_price_cents = round(no_price * 100)
+    buckets = HISTORICAL_WIN_RATES.get(signal_type, {})
+    for (low, high), win_rate in buckets.items():
+        if low <= no_price_cents <= high:
+            return win_rate
+    return 0.0
+
 
 @dataclass
 class WeatherTradingSignal:
@@ -40,16 +68,13 @@ class WeatherTradingSignal:
     ensemble_std: float = 0.0
     ensemble_members: int = 0
 
-    # Expected value in percentage points (e.g. 15.0 = 15% EV)
+    # Expected value as fraction (e.g. 0.15 = 15% EV)
     expected_value: float = 0.0
+    hist_win_rate: float = 0.0
 
     @property
     def passes_threshold(self) -> bool:
-        return (
-            abs(self.edge) >= settings.WEATHER_MIN_EDGE_THRESHOLD
-            and self.model_probability <= 0.10
-            and self.expected_value > 0
-        )
+        return self.edge >= 3.5 and self.expected_value > 0
 
 
 async def generate_weather_signal(
@@ -69,109 +94,90 @@ async def generate_weather_signal(
     if not forecast or not forecast.member_highs:
         return None
 
-    # Get ensemble members for this market's metric (used for both probability and confidence)
-    members = forecast.member_highs if market.metric == "high" else forecast.member_lows
-
-    # Calculate model probability based on market type
-    if market.direction == "above":
-        # Bracket market (B-type ticker): probability within ±0.5°F of threshold
-        low = market.threshold_f - 0.5
-        high = market.threshold_f + 0.5
-        model_yes_prob = len([m for m in members if low <= m <= high]) / len(members)
-    else:
-        # Non-bracket market (T-type): probability that temp stays below threshold
-        if market.metric == "high":
-            model_yes_prob = forecast.probability_high_below(market.threshold_f)
-        else:
-            model_yes_prob = forecast.probability_low_below(market.threshold_f)
-
-    # Clip extreme probabilities (ensemble can be unanimous but don't bet 100%)
-    model_yes_prob = max(0.05, min(0.95, model_yes_prob))
-
-    market_yes_prob = market.yes_price
-
-    # Use existing edge calculation (treats yes=up, no=down)
-    edge, direction_raw = calculate_edge(model_yes_prob, market_yes_prob)
-    direction = "yes" if direction_raw == "up" else "no"
-
-    # Only trade NO signals — YES signals not validated by backtest
-    if direction == "yes":
-        logger.debug(f"Skipping {market.market_id} — YES signals not supported by backtest")
-        return None
-
-    # Entry price filter — check the price of the side we're trading
-    entry_price = market.no_price if direction == "no" else market.yes_price
-    if entry_price > settings.WEATHER_MAX_ENTRY_PRICE:
-        edge = 0.0  # Zero out but still return for UI visibility
-
-    # Expected value calculation
-    model_no_prob = 1 - model_yes_prob
-    if direction == "yes":
-        ev = (model_yes_prob * (1 - market.yes_price)) - ((1 - model_yes_prob) * market.yes_price)
-    else:
-        no_price = 1 - market.yes_price
-        ev = (model_no_prob * (1 - no_price)) - ((1 - model_no_prob) * no_price)
-    expected_value = ev * 100
-
-    # Confidence = ensemble agreement (how one-sided the members are)
-    above_count = sum(1 for m in members if m > market.threshold_f)
-    agreement_frac = max(above_count, len(members) - above_count) / len(members)
-    confidence = min(0.9, agreement_frac)
-
-    # Kelly sizing
-    bankroll = settings.INITIAL_BANKROLL
-    suggested_size = calculate_kelly_size(
-        edge=abs(edge),
-        probability=model_yes_prob,
-        market_price=market_yes_prob,
-        direction=direction_raw,  # calculate_kelly_size expects "up"/"down"
-        bankroll=bankroll,
-    )
-    suggested_size = min(suggested_size, settings.WEATHER_MAX_TRADE_SIZE)
-
-    # Ensemble stats for display
+    # Ensemble stats
     mean_val = forecast.mean_high if market.metric == "high" else forecast.mean_low
-    std_val = forecast.std_high if market.metric == "high" else forecast.std_low
-
-    # GFS distance filter — only T-contracts where GFS is clearly above threshold
-    if market.direction == "above":
-        low = market.threshold_f - 0.5
-        high = market.threshold_f + 0.5
-        if (mean_val > low - 1.0) and (mean_val < high + 1.0):
-            logger.debug(f"Skipping {market.market_id} — GFS mean {mean_val:.1f}F too close to range {low:.0f}-{high:.0f}F")
-            return None
-    else:
-        # Require GFS mean to be >= 3.5F above threshold (validated sweet spot)
-        # Also skip if GFS predicts YES (mean_val < threshold_f)
-        if mean_val < market.threshold_f or (mean_val - market.threshold_f) < 3.5:
-            logger.debug(f"Skipping {market.market_id} — GFS mean {mean_val:.1f}F not >= 3.5F above threshold {market.threshold_f:.0f}F")
-            return None
+    std_val  = forecast.std_high  if market.metric == "high" else forecast.std_low
 
     if std_val > 1.0:
         logger.debug(f"Skipping {market.market_id} — GFS std {std_val:.1f}F exceeds 1.0F threshold")
         return None
 
-    # Build reasoning
-    filter_status = "ACTIONABLE" if abs(edge) >= settings.WEATHER_MIN_EDGE_THRESHOLD else "FILTERED"
-    filter_notes = []
-    if entry_price > settings.WEATHER_MAX_ENTRY_PRICE:
-        filter_notes.append(f"entry {entry_price:.0%} > {settings.WEATHER_MAX_ENTRY_PRICE:.0%}")
-    filter_note = f" [{', '.join(filter_notes)}]" if filter_notes else ""
+    # Determine signal type and temperature-based edge
+    if market.direction == "below":
+        signal_type = "T-above"
+        edge_f = mean_val - market.threshold_f
+    elif market.direction == "above":
+        if mean_val > market.threshold_f + 0.5:
+            signal_type = "B-above"
+            edge_f = mean_val - (market.threshold_f + 0.5)
+        elif mean_val < market.threshold_f - 0.5:
+            signal_type = "B-below"
+            edge_f = (market.threshold_f - 0.5) - mean_val
+        else:
+            logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within bracket range")
+            return None
+    else:
+        return None
 
+    if edge_f < 3.5:
+        logger.debug(f"Skipping {market.market_id} — GFS distance {edge_f:.1f}F below 3.5F minimum")
+        return None
+
+    # Always trade NO
+    direction = "no"
+    no_price = market.no_price
+
+    # Entry price filter
+    if no_price > settings.WEATHER_MAX_ENTRY_PRICE:
+        logger.debug(f"Skipping {market.market_id} — NO price {no_price:.0%} above max entry")
+        return None
+
+    # Historical win rate and EV
+    hist_win_rate  = get_historical_win_rate(signal_type, no_price)
+    expected_value = hist_win_rate - no_price  # positive if hist WR beats NO cost
+
+    # Ensemble probability (used for confidence and sizing)
+    members = forecast.member_highs if market.metric == "high" else forecast.member_lows
+    if market.direction == "above":
+        low = market.threshold_f - 0.5
+        high = market.threshold_f + 0.5
+        model_yes_prob = len([m for m in members if low <= m <= high]) / len(members)
+    else:
+        model_yes_prob = forecast.probability_high_below(market.threshold_f) if market.metric == "high" else forecast.probability_low_below(market.threshold_f)
+    model_yes_prob = max(0.05, min(0.95, model_yes_prob))
+    market_yes_prob = market.yes_price
+
+    # Confidence = ensemble agreement
+    above_count   = sum(1 for m in members if m > market.threshold_f)
+    agreement_frac = max(above_count, len(members) - above_count) / len(members)
+    confidence    = min(0.9, agreement_frac)
+
+    # Kelly sizing (uses probability-based edge for position sizing)
+    _, direction_raw = calculate_edge(model_yes_prob, market_yes_prob)
+    bankroll = settings.INITIAL_BANKROLL
+    suggested_size = calculate_kelly_size(
+        edge=abs(model_yes_prob - market_yes_prob),
+        probability=model_yes_prob,
+        market_price=market_yes_prob,
+        direction=direction_raw,
+        bankroll=bankroll,
+    )
+    suggested_size = min(suggested_size, settings.WEATHER_MAX_TRADE_SIZE)
+
+    filter_status = "ACTIONABLE" if edge_f >= 3.5 and expected_value > 0 else "FILTERED"
     reasoning = (
-        f"[{filter_status}]{filter_note} "
+        f"[{filter_status}] [{signal_type}] "
         f"{market.city_name} {market.metric} {market.direction} {market.threshold_f:.0f}F on {market.target_date} | "
         f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.num_members} members) | "
-        f"Model YES: {model_yes_prob:.0%} vs Market: {market_yes_prob:.0%} | "
-        f"Edge: {edge:+.1%} | EV: {expected_value:+.1f}% -> {direction.upper()} @ {entry_price:.0%} | "
-        f"Agreement: {agreement_frac:.0%}"
+        f"Edge: {edge_f:.1f}°F | EV: {expected_value*100:.1f}% | "
+        f"NO cost: {no_price*100:.0f}¢ | Hist WR: {hist_win_rate*100:.1f}%"
     )
 
     return WeatherTradingSignal(
         market=market,
         model_probability=model_yes_prob,
         market_probability=market_yes_prob,
-        edge=edge,
+        edge=edge_f,
         direction=direction,
         confidence=confidence,
         kelly_fraction=suggested_size / bankroll if bankroll > 0 else 0,
@@ -182,6 +188,7 @@ async def generate_weather_signal(
         ensemble_std=std_val,
         ensemble_members=forecast.num_members,
         expected_value=expected_value,
+        hist_win_rate=hist_win_rate,
     )
 
 
@@ -248,7 +255,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
 
     for signal in actionable[:5]:
         logger.info(f"  {signal.market.city_name}: {signal.market.metric} {signal.market.direction} "
-                     f"{signal.market.threshold_f:.0f}F | Edge: {signal.edge:+.1%}")
+                     f"{signal.market.threshold_f:.0f}F | Edge: {signal.edge:.1f}°F | EV: {signal.expected_value*100:.1f}%")
 
     if not settings.TRADING_ENABLED:
         logger.info("TRADING DISABLED — signal only mode")
@@ -270,6 +277,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
                 "ensemble_mean": signal.ensemble_mean,
                 "ensemble_std": signal.ensemble_std,
                 "market": {"threshold_f": signal.market.threshold_f, "direction": signal.market.direction},
+                "hist_win_rate": signal.hist_win_rate,
             })
 
     # Persist signals to DB
