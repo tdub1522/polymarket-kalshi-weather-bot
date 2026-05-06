@@ -14,13 +14,8 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
         logger.debug("Discord disabled or webhook not configured — skipping notification")
         return
 
-    edge_pct = f"{signal.get('edge', 0) * 100:+.1f}%"
-    ev_pct = f"{signal.get('expected_value', 0):+.1f}%"
-    model_prob_pct = f"{signal.get('model_probability', 0) * 100:.1f}%"
     yes_cents = round(signal.get('yes_price', 0) * 100)
     no_cents = round(signal.get('no_price', 0) * 100)
-    bid_ask = f"YES: {yes_cents}¢ / NO: {no_cents}¢"
-    size_dollars = f"${signal.get('suggested_size', 0):.2f}"
     members = signal.get('ensemble_members', 'N/A')
     ensemble_mean = signal.get('ensemble_mean', 0)
     ensemble_std = signal.get('ensemble_std', 0)
@@ -52,8 +47,8 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
         "fields": [
             {"name": "Ticker",               "value": signal.get("ticker", "N/A"),                                                    "inline": True},
             {"name": "Side",                 "value": signal.get("side", "N/A").upper(),                                              "inline": True},
-            {"name": "YES Price",            "value": f"{round(signal.get('market_probability', 0) * 100)}¢",                         "inline": True},
-            {"name": "NO Price",             "value": f"{round((1 - signal.get('market_probability', 0)) * 100)}¢",                   "inline": True},
+            {"name": "YES Price",            "value": f"{yes_cents}¢",                                                               "inline": True},
+            {"name": "NO Price",             "value": f"{no_cents}¢",                                                                  "inline": True},
             {"name": "Edge",                 "value": f"{signal.get('edge', 0):.1f}°F from threshold",                                "inline": True},
             {"name": "Expected Value",       "value": f"{signal.get('expected_value', 0) * 100:.1f}%",                                "inline": True},
             {"name": "Historical Win Rate",  "value": f"{signal.get('hist_win_rate', 0) * 100:.1f}%",                                 "inline": True},
