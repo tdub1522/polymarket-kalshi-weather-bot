@@ -49,7 +49,7 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
             {"name": "Side",                 "value": signal.get("side", "N/A").upper(),                                              "inline": True},
             {"name": "YES Price",            "value": f"{yes_cents}¢",                                                               "inline": True},
             {"name": "NO Price",             "value": f"{no_cents}¢",                                                                  "inline": True},
-            {"name": "Edge",                 "value": f"{signal.get('edge', 0):.1f}°F from threshold",                                "inline": True},
+
             {"name": "Expected Value",       "value": f"{signal.get('expected_value', 0) * 100:.1f}%",                                "inline": True},
             {"name": "Historical Win Rate",  "value": f"{signal.get('hist_win_rate', 0) * 100:.1f}%",                                 "inline": True},
             {"name": "Position Size",        "value": f"${signal.get('suggested_size', 0):.0f}",                                      "inline": True},
