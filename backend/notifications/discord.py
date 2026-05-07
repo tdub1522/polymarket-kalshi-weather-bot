@@ -52,7 +52,7 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
 
             {"name": "Expected Value",       "value": f"{signal.get('expected_value', 0) * 100:.1f}%",                                "inline": True},
             {"name": "Historical Win Rate",  "value": f"{signal.get('hist_win_rate', 0) * 100:.1f}%",                                 "inline": True},
-            {"name": "Position Size",        "value": f"${signal.get('suggested_size', 0):.0f}",                                      "inline": True},
+            {"name": "Position Size",        "value": f"${signal.get('suggested_size', 0):.0f} (confidence: {signal.get('confidence', 0)*100:.0f}%)", "inline": True},
             {"name": f"GFS Mean ({members} members)", "value": f"{ensemble_mean:.1f}°F",                                              "inline": True},
             {"name": "GFS Std",              "value": f"±{ensemble_std:.1f}°F",                                                       "inline": True},
             {"name": "GFS Distance",         "value": gfs_distance_label,                                                             "inline": True},

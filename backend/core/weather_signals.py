@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from typing import List, Optional
 
 from backend.config import settings
-from backend.core.signals import calculate_edge, calculate_kelly_size
+
 from backend.notifications.discord import send_discord_signal
 from backend.data.weather import fetch_ensemble_forecast
 from backend.data.weather_markets import WeatherMarket
@@ -42,6 +42,32 @@ def get_historical_win_rate(signal_type: str, no_price: float) -> float:
     return 0.0
 
 
+def calculate_position_size(
+    historical_win_rate: float,
+    expected_value: float,
+    gfs_distance: float,
+    yes_price: float,
+    bankroll: float = 80.0,
+) -> float:
+    win_rate_score = historical_win_rate
+    ev_score = min(expected_value / 0.30, 1.0)
+    distance_score = min(gfs_distance / 10.0, 1.0)
+    price_score = max(0.0, 1.0 - (yes_price / 0.30))
+
+    confidence = (
+        0.40 * win_rate_score +
+        0.35 * ev_score +
+        0.15 * distance_score +
+        0.10 * price_score
+    )
+
+    max_position = min(bankroll * 0.225, 50.0)
+    min_position = 10.0
+
+    position_size = min_position + (confidence * (max_position - min_position))
+    return round(position_size)
+
+
 @dataclass
 class WeatherTradingSignal:
     """A trading signal for a weather temperature market."""
@@ -71,6 +97,8 @@ class WeatherTradingSignal:
     # Expected value as fraction (e.g. 0.15 = 15% EV)
     expected_value: float = 0.0
     hist_win_rate: float = 0.0
+    yes_price_cents: int = 0
+    no_price_cents: int = 0
 
     @property
     def passes_threshold(self) -> bool:
@@ -126,6 +154,8 @@ async def generate_weather_signal(
     # Always trade NO
     direction = "no"
     no_price = market.no_price
+    yes_price_cents = round(market.yes_price * 100)
+    no_price_cents = round(market.no_price * 100)
 
     # Entry price filter
     if no_price > settings.WEATHER_MAX_ENTRY_PRICE:
@@ -152,17 +182,14 @@ async def generate_weather_signal(
     agreement_frac = max(above_count, len(members) - above_count) / len(members)
     confidence    = min(0.9, agreement_frac)
 
-    # Kelly sizing (uses probability-based edge for position sizing)
-    _, direction_raw = calculate_edge(model_yes_prob, market_yes_prob)
     bankroll = settings.INITIAL_BANKROLL
-    suggested_size = calculate_kelly_size(
-        edge=abs(model_yes_prob - market_yes_prob),
-        probability=model_yes_prob,
-        market_price=market_yes_prob,
-        direction=direction_raw,
+    suggested_size = calculate_position_size(
+        historical_win_rate=hist_win_rate,
+        expected_value=expected_value,
+        gfs_distance=abs(edge_f),
+        yes_price=market.yes_price,
         bankroll=bankroll,
     )
-    suggested_size = min(suggested_size, settings.WEATHER_MAX_TRADE_SIZE)
 
     filter_status = "ACTIONABLE" if edge_f >= 3.5 and expected_value > 0 else "FILTERED"
     reasoning = (
@@ -189,6 +216,8 @@ async def generate_weather_signal(
         ensemble_members=forecast.num_members,
         expected_value=expected_value,
         hist_win_rate=hist_win_rate,
+        yes_price_cents=yes_price_cents,
+        no_price_cents=no_price_cents,
     )
 
 
@@ -276,8 +305,11 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
                 "ensemble_members": signal.ensemble_members,
                 "ensemble_mean": signal.ensemble_mean,
                 "ensemble_std": signal.ensemble_std,
+                "confidence": signal.confidence,
                 "market": {"threshold_f": signal.market.threshold_f, "direction": signal.market.direction},
                 "hist_win_rate": signal.hist_win_rate,
+                "yes_price_cents": signal.yes_price_cents,
+                "no_price_cents": signal.no_price_cents,
             })
 
     # Persist signals to DB
