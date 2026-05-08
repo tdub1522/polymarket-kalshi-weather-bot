@@ -19,11 +19,11 @@ CITY_CONFIG: Dict[str, dict] = {
         "location": "Central Park",
     },
     "chicago": {
-        "lat": 41.9797,
-        "lon": -87.9044,
+        "lat": 41.7842,
+        "lon": -87.7553,
         "name": "Chicago",
-        "station": "KORD",
-        "location": "O'Hare International Airport",
+        "station": "KMDW",
+        "location": "Chicago Midway Airport",
     },
     "miami": {
         "lat": 25.7906,
