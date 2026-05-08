@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database (SQLite for Phase 1, PostgreSQL for production)
-    DATABASE_URL: str = "sqlite:///./tradingbot.db"
+    DATABASE_URL: str = "sqlite:////tmp/tradingbot.db"
 
     # Kalshi API
     KALSHI_API_KEY_ID: Optional[str] = "86d34ae3-04f4-4b7b-92ae-663fbb636aa8"
