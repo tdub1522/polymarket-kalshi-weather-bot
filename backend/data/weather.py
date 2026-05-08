@@ -131,16 +131,9 @@ def _celsius_to_fahrenheit(c: float) -> float:
     return c * 9.0 / 5.0 + 32.0
 
 
-ENSEMBLE_MODELS = [
-    {"name": "icon_seamless",   "label": "DWD ICON EPS"},
-    {"name": "ncep_gefs025",    "label": "GFS Ensemble 0.25"},
-    {"name": "ecmwf_aifs025",   "label": "ECMWF AIFS 0.25"},
-]
-
-
 async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = None) -> Optional[EnsembleForecast]:
     """
-    Fetch ensemble forecast from Open-Meteo combining ICON EPS, GFS, and ECMWF AIFS.
+    Fetch ensemble forecast from Open-Meteo using DWD ICON EPS Seamless (icon_seamless).
     Returns per-member daily max temperatures in Fahrenheit.
     """
     if city_key not in CITY_CONFIG:
@@ -158,13 +151,13 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
             return cached_forecast
 
     config = CITY_CONFIG[city_key]
-    logger.info(f"Fetching multi-model ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
+    logger.info(f"Fetching ICON EPS ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
 
     member_highs: List[float] = []
     member_lows: List[float] = []
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        for model in ENSEMBLE_MODELS:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             params = {
                 "latitude": config["lat"],
                 "longitude": config["lon"],
@@ -173,34 +166,29 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
                 "timezone": "America/New_York",
                 "start_date": target_date.isoformat(),
                 "end_date": target_date.isoformat(),
-                "models": model["name"],
+                "models": "icon_seamless",
             }
-            try:
-                response = await client.get(
-                    "https://ensemble-api.open-meteo.com/v1/ensemble",
-                    params=params,
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await client.get(
+                "https://ensemble-api.open-meteo.com/v1/ensemble",
+                params=params,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                hourly = data.get("hourly", {})
-                highs_from_model: List[float] = []
-                lows_from_model: List[float] = []
+            hourly = data.get("hourly", {})
+            logger.info(f"ICON EPS response keys: {list(hourly.keys())[:5]}")
 
-                for key, values in hourly.items():
-                    if "temperature_2m" in key and values:
-                        valid = [v for v in values if v is not None]
-                        if valid:
-                            highs_from_model.append(max(valid))
-                            lows_from_model.append(min(valid))
+            for key, values in hourly.items():
+                if "temperature_2m" in key and values:
+                    valid = [v for v in values if v is not None]
+                    if valid:
+                        member_highs.append(max(valid))
+                        member_lows.append(min(valid))
 
-                logger.info(f"{model['label']} response keys: {list(hourly.keys())[:5]}")
-                logger.info(f"{model['label']} members found: {len(highs_from_model)}")
-                member_highs.extend(highs_from_model)
-                member_lows.extend(lows_from_model)
+            logger.info(f"ICON EPS members found: {len(member_highs)}")
 
-            except Exception as e:
-                logger.warning(f"Failed to fetch {model['label']} for {city_key}: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch ICON EPS ensemble for {city_key}: {e}")
 
     logger.info(f"Total members combined: {len(member_highs)}")
     logger.info(f"Sample member highs: {member_highs[:5]}")
