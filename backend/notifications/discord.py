@@ -1,5 +1,6 @@
 """Discord webhook notifications for trade signals."""
 import asyncio
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -8,11 +9,27 @@ logger = logging.getLogger("trading_bot")
 
 from backend.config import settings
 
+_recently_sent: dict[str, datetime] = {}
+
 
 async def send_discord_signal(signal: dict[str, Any]) -> None:
+    global _recently_sent
+
     if not settings.DISCORD_ENABLED or not settings.DISCORD_WEBHOOK_URL:
         logger.debug("Discord disabled or webhook not configured — skipping notification")
         return
+
+    ticker = signal.get("ticker", "")
+    now = datetime.utcnow()
+
+    if ticker in _recently_sent:
+        time_since_last = now - _recently_sent[ticker]
+        if time_since_last < timedelta(hours=1):
+            logger.debug(f"Skipping Discord alert for {ticker} — sent {time_since_last.seconds // 60}m ago")
+            return
+
+    _recently_sent[ticker] = now
+    _recently_sent = {k: v for k, v in _recently_sent.items() if now - v < timedelta(hours=2)}
 
     yes_cents = round(signal.get('yes_price', 0) * 100)
     no_cents = round(signal.get('no_price', 0) * 100)
