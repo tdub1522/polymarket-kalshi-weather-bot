@@ -103,7 +103,7 @@ class WeatherTradingSignal:
 
     @property
     def passes_threshold(self) -> bool:
-        return self.edge >= 3.5 and self.expected_value > 0
+        return self.edge >= 3.0 and self.expected_value > 0
 
 
 async def generate_weather_signal(
@@ -134,21 +134,27 @@ async def generate_weather_signal(
     if market.direction == "below":
         signal_type = "T-above"
         edge_f = mean_val - market.threshold_f
+        if mean_val <= market.threshold_f + 3.0:
+            logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within 3.0F of threshold {market.threshold_f:.0f}F")
+            return None
     elif market.direction == "above":
         if mean_val > market.threshold_f + 0.5:
             signal_type = "B-above"
             edge_f = mean_val - (market.threshold_f + 0.5)
+            if edge_f < 1.0:
+                logger.debug(f"Skipping {market.market_id} — B-above edge {edge_f:.1f}F below 1.0F minimum")
+                return None
         elif mean_val < market.threshold_f - 0.5:
             signal_type = "B-below"
-            edge_f = (market.threshold_f - 0.5) - mean_val
+            bottom_of_range = market.threshold_f - 0.5
+            edge_f = bottom_of_range - mean_val
+            if mean_val >= bottom_of_range - 3.0:
+                logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within 3.0F of bracket bottom {bottom_of_range:.1f}F")
+                return None
         else:
             logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within bracket range")
             return None
     else:
-        return None
-
-    if edge_f < 3.5:
-        logger.debug(f"Skipping {market.market_id} — GFS distance {edge_f:.1f}F below 3.5F minimum")
         return None
 
     # Always trade NO
