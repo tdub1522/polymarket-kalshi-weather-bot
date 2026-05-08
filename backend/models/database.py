@@ -1,7 +1,7 @@
 """Database models and connection for BTC 5-min trading bot."""
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, JSON, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, JSON, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import inspect
@@ -144,6 +144,46 @@ class ScanLog(Base):
 
     success = Column(Boolean, default=True)
     error = Column(String, nullable=True)
+
+
+class LiveSignal(Base):
+    __tablename__ = "live_signals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Signal identification
+    ticker = Column(String, nullable=False, index=True)
+    signal_type = Column(String, nullable=False)  # T-above, B-above, B-below
+    city = Column(String, nullable=False)
+    target_date = Column(String, nullable=False)
+    threshold_f = Column(Float, nullable=False)
+
+    # GFS forecast data
+    gfs_mean = Column(Float, nullable=False)
+    gfs_std = Column(Float, nullable=False)
+    gfs_distance = Column(Float, nullable=False)
+
+    # Market prices at time of signal
+    yes_price_cents = Column(Integer, nullable=False)
+    no_price_cents = Column(Integer, nullable=False)
+
+    # Signal metrics
+    historical_win_rate = Column(Float, nullable=False)
+    expected_value = Column(Float, nullable=False)
+    confidence_score = Column(Float, nullable=False)
+    suggested_size = Column(Float, nullable=False)
+
+    # Timing
+    signal_fired_at = Column(DateTime, default=datetime.utcnow)
+
+    # Outcome (filled in after settlement)
+    actual_result = Column(String, nullable=True)   # "yes" or "no"
+    signal_correct = Column(Boolean, nullable=True)
+    profit_loss = Column(Float, nullable=True)
+    settled_at = Column(DateTime, nullable=True)
+
+    # Raw reasoning string for debugging
+    reasoning = Column(Text, nullable=True)
 
 
 def init_db():

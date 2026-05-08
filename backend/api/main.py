@@ -11,7 +11,7 @@ import os
 from backend.config import settings
 from backend.models.database import (
     get_db, init_db, SessionLocal,
-    Signal, Trade, BotState, AILog, ScanLog
+    Signal, Trade, BotState, AILog, ScanLog, LiveSignal
 )
 from backend.core.signals import scan_for_signals, TradingSignal
 from backend.data.btc_markets import fetch_active_btc_markets, BtcMarket
@@ -769,6 +769,43 @@ def _weather_signal_to_response(s) -> WeatherSignalResponse:
         ensemble_members=s.ensemble_members,
         actionable=s.passes_threshold,
     )
+
+
+@app.get("/api/live-signals")
+def get_live_signals():
+    db = SessionLocal()
+    try:
+        signals = db.query(LiveSignal).order_by(
+            LiveSignal.signal_fired_at.desc()
+        ).limit(100).all()
+        return [
+            {
+                "id": s.id,
+                "ticker": s.ticker,
+                "signal_type": s.signal_type,
+                "city": s.city,
+                "target_date": s.target_date,
+                "threshold_f": s.threshold_f,
+                "gfs_mean": s.gfs_mean,
+                "gfs_std": s.gfs_std,
+                "gfs_distance": s.gfs_distance,
+                "yes_price_cents": s.yes_price_cents,
+                "no_price_cents": s.no_price_cents,
+                "historical_win_rate": s.historical_win_rate,
+                "expected_value": s.expected_value,
+                "confidence_score": s.confidence_score,
+                "suggested_size": s.suggested_size,
+                "signal_fired_at": str(s.signal_fired_at),
+                "actual_result": s.actual_result,
+                "signal_correct": s.signal_correct,
+                "profit_loss": s.profit_loss,
+                "settled_at": str(s.settled_at) if s.settled_at else None,
+                "reasoning": s.reasoning,
+            }
+            for s in signals
+        ]
+    finally:
+        db.close()
 
 
 @app.get("/api/events", response_model=List[EventResponse])

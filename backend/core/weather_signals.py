@@ -9,7 +9,7 @@ from backend.config import settings
 from backend.notifications.discord import send_discord_signal
 from backend.data.weather import fetch_ensemble_forecast
 from backend.data.weather_markets import WeatherMarket
-from backend.models.database import SessionLocal, Signal
+from backend.models.database import SessionLocal, Signal, LiveSignal
 
 logger = logging.getLogger("trading_bot")
 
@@ -99,6 +99,7 @@ class WeatherTradingSignal:
     hist_win_rate: float = 0.0
     yes_price_cents: int = 0
     no_price_cents: int = 0
+    signal_type: str = ""
 
     @property
     def passes_threshold(self) -> bool:
@@ -218,7 +219,38 @@ async def generate_weather_signal(
         hist_win_rate=hist_win_rate,
         yes_price_cents=yes_price_cents,
         no_price_cents=no_price_cents,
+        signal_type=signal_type,
     )
+
+
+def _persist_live_signal(signal: "WeatherTradingSignal") -> None:
+    db = SessionLocal()
+    try:
+        record = LiveSignal(
+            ticker=signal.market.market_id,
+            signal_type=signal.signal_type,
+            city=signal.market.city_key,
+            target_date=str(signal.market.target_date),
+            threshold_f=signal.market.threshold_f,
+            gfs_mean=signal.ensemble_mean,
+            gfs_std=signal.ensemble_std,
+            gfs_distance=abs(signal.edge),
+            yes_price_cents=round(signal.market.yes_price * 100),
+            no_price_cents=round(signal.market.no_price * 100),
+            historical_win_rate=signal.hist_win_rate,
+            expected_value=signal.expected_value,
+            confidence_score=signal.confidence,
+            suggested_size=signal.suggested_size,
+            reasoning=signal.reasoning,
+        )
+        db.add(record)
+        db.commit()
+        logger.info(f"Persisted live signal for {signal.market.market_id}")
+    except Exception as e:
+        logger.warning(f"Failed to persist live signal: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
@@ -288,6 +320,10 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
 
     if not settings.TRADING_ENABLED:
         logger.info("TRADING DISABLED — signal only mode")
+
+    # Persist actionable signals to live_signals table
+    for signal in actionable:
+        _persist_live_signal(signal)
 
     # Notify Discord — only when alerts are enabled and auto-trading is explicitly off
     if settings.DISCORD_ENABLED and not settings.TRADING_ENABLED:
