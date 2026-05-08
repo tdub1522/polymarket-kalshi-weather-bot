@@ -118,9 +118,8 @@ async def generate_weather_signal(
     - Compare to market price to find edge
     - Size using Kelly criterion
     """
-    if forecast is None:
-        forecast = await fetch_ensemble_forecast(market.city_key, market.target_date)
     if not forecast or not forecast.member_highs:
+        logger.debug(f"No forecast available for {market.market_id} ({market.city_key} on {market.target_date}) — skipping")
         return None
 
     # Ensemble stats
@@ -304,6 +303,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
             forecast = await fetch_ensemble_forecast(city_key, target_date)
             if forecast:
                 forecast_cache[cache_key] = forecast
+                logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.mean_high:.1f}F")
         except Exception as e:
             logger.warning(f"Failed to pre-fetch ensemble for {city_key} {target_date}: {e}")
 
