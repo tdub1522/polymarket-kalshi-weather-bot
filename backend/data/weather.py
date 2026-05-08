@@ -9,71 +9,63 @@ import time
 
 logger = logging.getLogger("trading_bot")
 
-# City configurations with lat/lon and NWS station identifiers
+# City configurations keyed to exact NWS station locations used by Kalshi for settlement
 CITY_CONFIG: Dict[str, dict] = {
     "nyc": {
+        "lat": 40.7833,
+        "lon": -73.9667,
         "name": "New York City",
-        "lat": 40.7128,
-        "lon": -74.0060,
-        "nws_station": "KNYC",
-        "nws_office": "OKX",
-        "nws_gridpoint": "OKX/33,37",
+        "station": "KNYC",
+        "location": "Central Park",
     },
     "chicago": {
+        "lat": 41.9797,
+        "lon": -87.9044,
         "name": "Chicago",
-        "lat": 41.8781,
-        "lon": -87.6298,
-        "nws_station": "KORD",
-        "nws_office": "LOT",
-        "nws_gridpoint": "LOT/75,72",
+        "station": "KORD",
+        "location": "O'Hare International Airport",
     },
     "miami": {
+        "lat": 25.7906,
+        "lon": -80.3164,
         "name": "Miami",
-        "lat": 25.7617,
-        "lon": -80.1918,
-        "nws_station": "KMIA",
-        "nws_office": "MFL",
-        "nws_gridpoint": "MFL/75,53",
+        "station": "KMIA",
+        "location": "Miami International Airport",
     },
     "los_angeles": {
+        "lat": 33.9381,
+        "lon": -118.3889,
         "name": "Los Angeles",
-        "lat": 34.0522,
-        "lon": -118.2437,
-        "nws_station": "KLAX",
-        "nws_office": "LOX",
-        "nws_gridpoint": "LOX/154,44",
+        "station": "KLAX",
+        "location": "LAX International Airport",
     },
     "denver": {
+        "lat": 39.8466,
+        "lon": -104.6562,
         "name": "Denver",
-        "lat": 39.7392,
-        "lon": -104.9903,
-        "nws_station": "KDEN",
-        "nws_office": "BOU",
-        "nws_gridpoint": "BOU/62,60",
+        "station": "KDEN",
+        "location": "Denver International Airport",
     },
     "boston": {
+        "lat": 42.3606,
+        "lon": -71.0100,
         "name": "Boston",
-        "lat": 42.3601,
-        "lon": -71.0589,
-        "nws_station": "KBOS",
-        "nws_office": "BOX",
-        "nws_gridpoint": "BOX/71,90",
+        "station": "KBOS",
+        "location": "Boston Logan International Airport",
     },
     "philadelphia": {
+        "lat": 39.8733,
+        "lon": -75.2268,
         "name": "Philadelphia",
-        "lat": 39.9526,
-        "lon": -75.1652,
-        "nws_station": "KPHL",
-        "nws_office": "PHI",
-        "nws_gridpoint": "PHI/49,37",
+        "station": "KPHL",
+        "location": "Philadelphia International Airport",
     },
     "atlanta": {
+        "lat": 33.6407,
+        "lon": -84.4277,
         "name": "Atlanta",
-        "lat": 33.7490,
-        "lon": -84.3880,
-        "nws_station": "KATL",
-        "nws_office": "FFC",
-        "nws_gridpoint": "FFC/52,41",
+        "station": "KATL",
+        "location": "Hartsfield-Jackson Atlanta International Airport",
     },
 }
 
@@ -158,14 +150,15 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
         if now - cached_time < _CACHE_TTL:
             return cached_forecast
 
-    city = CITY_CONFIG[city_key]
+    config = CITY_CONFIG[city_key]
+    logger.info(f"Fetching GFS ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             # Open-Meteo Ensemble API — GFS ensemble with 31 members
             params = {
-                "latitude": city["lat"],
-                "longitude": city["lon"],
+                "latitude": config["lat"],
+                "longitude": config["lon"],
                 "daily": "temperature_2m_max,temperature_2m_min",
                 "temperature_unit": "fahrenheit",
                 "start_date": target_date.isoformat(),
@@ -221,7 +214,7 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
 
             forecast = EnsembleForecast(
                 city_key=city_key,
-                city_name=city["name"],
+                city_name=config["name"],
                 target_date=target_date,
                 member_highs=member_highs,
                 member_lows=member_lows,
@@ -232,7 +225,7 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
             )
 
             _forecast_cache[cache_key] = (now, forecast)
-            logger.info(f"Ensemble forecast for {city['name']} on {target_date}: "
+            logger.info(f"Ensemble forecast for {config['name']} on {target_date}: "
                         f"High {forecast.mean_high:.1f}F +/- {forecast.std_high:.1f}F "
                         f"({forecast.num_members} members)")
 
@@ -252,13 +245,14 @@ async def fetch_nws_observed_temperature(city_key: str, target_date: Optional[da
         return None
 
     city = CITY_CONFIG[city_key]
+
     if target_date is None:
         target_date = date.today()
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             # NWS observations endpoint
-            station = city["nws_station"]
+            station = city["station"]
             url = f"https://api.weather.gov/stations/{station}/observations"
             headers = {"User-Agent": "(trading-bot, contact@example.com)"}
 
