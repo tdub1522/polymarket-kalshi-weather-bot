@@ -226,6 +226,16 @@ async def generate_weather_signal(
 def _persist_live_signal(signal: "WeatherTradingSignal") -> None:
     db = SessionLocal()
     try:
+        today = date.today()
+        existing = db.query(LiveSignal).filter(
+            LiveSignal.ticker == signal.market.market_id,
+            LiveSignal.signal_fired_at >= datetime(today.year, today.month, today.day,
+                                                   tzinfo=timezone.utc),
+        ).first()
+        if existing:
+            logger.debug(f"Duplicate signal skipped for {signal.market.market_id} — already logged today")
+            return
+
         record = LiveSignal(
             ticker=signal.market.market_id,
             signal_type=signal.signal_type,
