@@ -194,18 +194,20 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
                             highs_from_model.append(max(valid))
                             lows_from_model.append(min(valid))
 
+                logger.info(f"{model['label']} response keys: {list(hourly.keys())[:5]}")
+                logger.info(f"{model['label']} members found: {len(highs_from_model)}")
                 member_highs.extend(highs_from_model)
                 member_lows.extend(lows_from_model)
-                logger.info(f"{model['label']}: {len(highs_from_model)} members")
 
             except Exception as e:
                 logger.warning(f"Failed to fetch {model['label']} for {city_key}: {e}")
 
-    if not member_highs:
-        logger.warning(f"No ensemble data for {city_key} on {target_date} from any model")
-        return None
+    logger.info(f"Total members combined: {len(member_highs)}")
+    logger.info(f"Sample member highs: {member_highs[:5]}")
 
-    logger.info(f"Sample member highs for {city_key}: {member_highs[:5]}")
+    if not member_highs:
+        logger.warning(f"No ensemble members found for {city_key} on {target_date}")
+        return None
 
     initial_mean_high = statistics.mean(member_highs)
     initial_std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
