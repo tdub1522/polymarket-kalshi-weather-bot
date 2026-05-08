@@ -131,10 +131,17 @@ def _celsius_to_fahrenheit(c: float) -> float:
     return c * 9.0 / 5.0 + 32.0
 
 
+ENSEMBLE_MODELS = [
+    {"name": "icon_seamless",   "label": "DWD ICON EPS"},
+    {"name": "ncep_gefs025",    "label": "GFS Ensemble 0.25"},
+    {"name": "ecmwf_aifs025",   "label": "ECMWF AIFS 0.25"},
+]
+
+
 async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = None) -> Optional[EnsembleForecast]:
     """
-    Fetch ensemble forecast from Open-Meteo Ensemble API (free, 31-member GFS).
-    Returns per-member daily max/min temperatures in Fahrenheit.
+    Fetch ensemble forecast from Open-Meteo combining ICON EPS, GFS, and ECMWF AIFS.
+    Returns per-member daily max temperatures in Fahrenheit.
     """
     if city_key not in CITY_CONFIG:
         logger.warning(f"Unknown city key: {city_key}")
@@ -151,89 +158,87 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
             return cached_forecast
 
     config = CITY_CONFIG[city_key]
-    logger.info(f"Fetching GFS ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
+    logger.info(f"Fetching multi-model ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Open-Meteo Ensemble API — GFS ensemble with 31 members
+    member_highs: List[float] = []
+    member_lows: List[float] = []
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for model in ENSEMBLE_MODELS:
             params = {
                 "latitude": config["lat"],
                 "longitude": config["lon"],
-                "daily": "temperature_2m_max,temperature_2m_min",
+                "hourly": "temperature_2m",
                 "temperature_unit": "fahrenheit",
+                "timezone": "America/New_York",
                 "start_date": target_date.isoformat(),
                 "end_date": target_date.isoformat(),
-                "models": "gfs_seamless",
+                "models": model["name"],
             }
+            try:
+                response = await client.get(
+                    "https://ensemble-api.open-meteo.com/v1/ensemble",
+                    params=params,
+                )
+                response.raise_for_status()
+                data = response.json()
 
-            response = await client.get(
-                "https://ensemble-api.open-meteo.com/v1/ensemble",
-                params=params,
-            )
-            response.raise_for_status()
-            data = response.json()
+                hourly = data.get("hourly", {})
+                highs_from_model: List[float] = []
+                lows_from_model: List[float] = []
 
-            daily = data.get("daily", {})
+                for key, values in hourly.items():
+                    if "temperature_2m" in key and values:
+                        valid = [v for v in values if v is not None]
+                        if valid:
+                            highs_from_model.append(max(valid))
+                            lows_from_model.append(min(valid))
 
-            # Open-Meteo returns each ensemble member as a separate key:
-            #   temperature_2m_max (control), temperature_2m_max_member01, ..., _member30
-            # Collect all member values for highs and lows
-            member_highs = []
-            member_lows = []
+                member_highs.extend(highs_from_model)
+                member_lows.extend(lows_from_model)
+                logger.info(f"{model['label']}: {len(highs_from_model)} members")
 
-            for key, values in daily.items():
-                if not isinstance(values, list) or not values:
-                    continue
-                val = values[0]
-                if val is None:
-                    continue
-                if "temperature_2m_max" in key:
-                    member_highs.append(float(val))
-                elif "temperature_2m_min" in key:
-                    member_lows.append(float(val))
+            except Exception as e:
+                logger.warning(f"Failed to fetch {model['label']} for {city_key}: {e}")
 
-            logger.info(f"Sample member highs for {city_key}: {member_highs[:5]}")
-
-            if not member_highs:
-                logger.warning(f"No ensemble data for {city_key} on {target_date}")
-                return None
-
-            initial_mean_high = statistics.mean(member_highs)
-            initial_std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
-            filtered_highs = [m for m in member_highs if abs(m - initial_mean_high) <= 2 * initial_std_high]
-            mean_high = statistics.mean(filtered_highs)
-            std_high = statistics.stdev(filtered_highs) if len(filtered_highs) > 1 else 0.0
-            logger.info(f"High temp filtering: {len(filtered_highs)}/{len(member_highs)} members within 2 std")
-
-            initial_mean_low = statistics.mean(member_lows) if member_lows else 0.0
-            initial_std_low = statistics.stdev(member_lows) if len(member_lows) > 1 else 0.0
-            filtered_lows = [m for m in member_lows if abs(m - initial_mean_low) <= 2 * initial_std_low] if member_lows else []
-            mean_low = statistics.mean(filtered_lows) if filtered_lows else 0.0
-            std_low = statistics.stdev(filtered_lows) if len(filtered_lows) > 1 else 0.0
-            logger.info(f"Low temp filtering: {len(filtered_lows)}/{len(member_lows)} members within 2 std")
-
-            forecast = EnsembleForecast(
-                city_key=city_key,
-                city_name=config["name"],
-                target_date=target_date,
-                member_highs=member_highs,
-                member_lows=member_lows,
-                mean_high=mean_high,
-                std_high=std_high,
-                mean_low=mean_low,
-                std_low=std_low,
-            )
-
-            _forecast_cache[cache_key] = (now, forecast)
-            logger.info(f"Ensemble forecast for {config['name']} on {target_date}: "
-                        f"High {forecast.mean_high:.1f}F +/- {forecast.std_high:.1f}F "
-                        f"({forecast.num_members} members)")
-
-            return forecast
-
-    except Exception as e:
-        logger.warning(f"Failed to fetch ensemble forecast for {city_key}: {e}")
+    if not member_highs:
+        logger.warning(f"No ensemble data for {city_key} on {target_date} from any model")
         return None
+
+    logger.info(f"Sample member highs for {city_key}: {member_highs[:5]}")
+
+    initial_mean_high = statistics.mean(member_highs)
+    initial_std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
+    filtered_highs = [m for m in member_highs if abs(m - initial_mean_high) <= 2 * initial_std_high]
+    mean_high = statistics.mean(filtered_highs)
+    std_high = statistics.stdev(filtered_highs) if len(filtered_highs) > 1 else 0.0
+    logger.info(f"High temp filtering: {len(filtered_highs)}/{len(member_highs)} members within 2 std")
+
+    initial_mean_low = statistics.mean(member_lows) if member_lows else 0.0
+    initial_std_low = statistics.stdev(member_lows) if len(member_lows) > 1 else 0.0
+    filtered_lows = [m for m in member_lows if abs(m - initial_mean_low) <= 2 * initial_std_low] if member_lows else []
+    mean_low = statistics.mean(filtered_lows) if filtered_lows else 0.0
+    std_low = statistics.stdev(filtered_lows) if len(filtered_lows) > 1 else 0.0
+    logger.info(f"Low temp filtering: {len(filtered_lows)}/{len(member_lows)} members within 2 std")
+
+    forecast = EnsembleForecast(
+        city_key=city_key,
+        city_name=config["name"],
+        target_date=target_date,
+        member_highs=filtered_highs,
+        member_lows=filtered_lows,
+        mean_high=mean_high,
+        std_high=std_high,
+        mean_low=mean_low,
+        std_low=std_low,
+    )
+
+    _forecast_cache[cache_key] = (now, forecast)
+    logger.info(f"Ensemble forecast for {config['name']} on {target_date}: "
+                f"High {forecast.mean_high:.1f}F +/- {forecast.std_high:.1f}F "
+                f"({forecast.num_members} members total)")
+
+    return forecast
 
 
 async def fetch_nws_observed_temperature(city_key: str, target_date: Optional[date] = None) -> Optional[Dict[str, float]]:
