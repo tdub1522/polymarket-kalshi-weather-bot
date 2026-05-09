@@ -197,16 +197,7 @@ async def generate_weather_signal(
         bankroll=bankroll,
     )
 
-    filter_status = "ACTIONABLE" if edge_f >= 3.5 and expected_value > 0 else "FILTERED"
-    reasoning = (
-        f"[{filter_status}] [{signal_type}] "
-        f"{market.city_name} {market.metric} {market.direction} {market.threshold_f:.0f}F on {market.target_date} | "
-        f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.num_members} members) | "
-        f"Edge: {edge_f:.1f}°F | EV: {expected_value*100:.1f}% | "
-        f"NO cost: {no_price*100:.0f}¢ | Hist WR: {hist_win_rate*100:.1f}%"
-    )
-
-    return WeatherTradingSignal(
+    signal = WeatherTradingSignal(
         market=market,
         model_probability=model_yes_prob,
         market_probability=market_yes_prob,
@@ -216,7 +207,6 @@ async def generate_weather_signal(
         kelly_fraction=suggested_size / bankroll if bankroll > 0 else 0,
         suggested_size=suggested_size,
         sources=[f"open_meteo_ensemble_{forecast.num_members}m"],
-        reasoning=reasoning,
         ensemble_mean=mean_val,
         ensemble_std=std_val,
         ensemble_members=forecast.num_members,
@@ -226,6 +216,17 @@ async def generate_weather_signal(
         no_price_cents=no_price_cents,
         signal_type=signal_type,
     )
+
+    filter_status = "ACTIONABLE" if signal.passes_threshold else "FILTERED"
+    signal.reasoning = (
+        f"[{filter_status}] [{signal_type}] "
+        f"{market.city_name} {market.metric} {market.direction} {market.threshold_f:.0f}F on {market.target_date} | "
+        f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.num_members} members) | "
+        f"Edge: {edge_f:.1f}°F | EV: {expected_value*100:.1f}% | "
+        f"NO cost: {no_price*100:.0f}¢ | Hist WR: {hist_win_rate*100:.1f}%"
+    )
+
+    return signal
 
 
 def _persist_live_signal(signal: "WeatherTradingSignal") -> None:
