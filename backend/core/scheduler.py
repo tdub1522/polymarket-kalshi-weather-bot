@@ -362,6 +362,113 @@ async def settlement_job():
         logger.exception("Error in settlement_job")
 
 
+async def btc15m_scan_job():
+    """Background job: run the KXBTC15M ROMA pipeline once.
+
+    Signal-only by design — never places orders. Records the signal to
+    Postgres and posts to Discord when actionable.
+    """
+    log_event("info", "Scanning KXBTC15M (Kalshi 15-min BTC)...")
+
+    try:
+        from backend.btc15m.pipeline import run_btc15m_pipeline
+        from backend.btc15m.discord_alerter import send_btc15m_alert
+        from backend.models.database import Btc15mSignal
+
+        db = SessionLocal()
+        try:
+            state = db.query(BotState).first()
+            bankroll = state.bankroll if state else settings.INITIAL_BANKROLL
+
+            # Per-day P&L for KXBTC15M only.
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            daily_pnl = (
+                db.query(func.coalesce(func.sum(Btc15mSignal.realized_pnl), 0.0))
+                .filter(Btc15mSignal.settled == True, Btc15mSignal.settled_at >= today_start)
+                .scalar()
+            )
+            trades_today = (
+                db.query(Btc15mSignal)
+                .filter(Btc15mSignal.timestamp >= today_start,
+                        Btc15mSignal.recommendation != "PASS")
+                .count()
+            )
+
+            result = await run_btc15m_pipeline(
+                bankroll=bankroll,
+                daily_pnl=daily_pnl,
+                drawdown_pct=0.0,  # TODO: derive from equity curve once 1+ day of data exists
+                trades_today=trades_today,
+            )
+
+            if result.error:
+                log_event("error", f"KXBTC15M pipeline error: {result.error}")
+                return
+            if not result.signal:
+                log_event("info", f"KXBTC15M: no signal this cycle ({result.markets_seen} markets seen)")
+                return
+
+            sig = result.signal
+            row = Btc15mSignal(
+                market_ticker=sig.market.market_ticker,
+                event_ticker=sig.market.event_ticker,
+                floor_strike=sig.market.floor_strike,
+                close_time=sig.market.close_time,
+                spot=sig.spot,
+                yes_ask=sig.market.yes_ask,
+                yes_bid=sig.market.yes_bid,
+                no_ask=sig.market.no_ask,
+                no_bid=sig.market.no_bid,
+                volume=sig.market.volume,
+                market_implied_p=sig.market_implied_p,
+                p_yes=sig.p_yes,
+                edge=sig.edge,
+                recommendation=sig.recommendation,
+                confidence=sig.confidence,
+                contracts=sig.contracts,
+                notional_usd=sig.notional_usd,
+                kelly_fraction=sig.kelly_fraction,
+                sentiment_label=sig.sentiment.label if sig.sentiment else None,
+                sentiment_score=sig.sentiment.score if sig.sentiment else None,
+                thesis=sig.thesis,
+                key_drivers=sig.key_drivers,
+                risk_reasons=sig.risk_reasons,
+                auto_executed=False,  # signal-only
+            )
+            db.add(row)
+            db.commit()
+
+            log_event(
+                "data",
+                f"KXBTC15M signal: {sig.recommendation} edge={sig.edge*100:+.2f}% "
+                f"P(YES)={sig.p_yes:.3f} conf={sig.confidence:.2f}",
+                {
+                    "ticker": sig.market.market_ticker,
+                    "recommendation": sig.recommendation,
+                    "edge": sig.edge,
+                    "p_yes": sig.p_yes,
+                    "elapsed_ms": result.elapsed_ms,
+                },
+            )
+
+            await send_btc15m_alert(sig)
+
+            # Trading auto-execution path is intentionally NOT wired up.
+            # Manual trade required while edge is being established.
+            if settings.TRADING_ENABLED and settings.KXBTC15M_AUTO_EXECUTE:
+                log_event(
+                    "warning",
+                    "KXBTC15M_AUTO_EXECUTE is True but auto-execution path is not "
+                    "implemented — signal is being treated as manual.",
+                )
+        finally:
+            db.close()
+
+    except Exception as exc:
+        log_event("error", f"KXBTC15M scan exception: {exc}")
+        logger.exception("Error in btc15m_scan_job")
+
+
 async def heartbeat_job():
     """Periodic heartbeat. Runs every minute."""
     db = None
@@ -427,6 +534,22 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1
     )
+
+    # KXBTC15M signal pipeline — signal-only, gated by KXBTC15M_ENABLED.
+    # Independent of TRADING_ENABLED because this job NEVER places orders;
+    # it only generates signals + Discord alerts for manual trading.
+    if getattr(settings, "KXBTC15M_ENABLED", False):
+        btc15m_seconds = getattr(settings, "KXBTC15M_SCAN_INTERVAL_SECONDS", 300)
+        scheduler.add_job(
+            btc15m_scan_job,
+            IntervalTrigger(seconds=btc15m_seconds),
+            id="btc15m_scan",
+            replace_existing=True,
+            max_instances=1,
+        )
+        log_event("info", f"KXBTC15M scan job registered (every {btc15m_seconds}s)")
+        # Kick off one immediate run so the first signal doesn't wait 5 min.
+        asyncio.create_task(btc15m_scan_job())
 
     # Weather trading jobs (gated by WEATHER_ENABLED)
     if settings.WEATHER_ENABLED:

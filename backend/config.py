@@ -43,6 +43,28 @@ class Settings(BaseSettings):
     DISCORD_WEBHOOK_URL: Optional[str] = None
     DISCORD_ENABLED: bool = False
 
+    # ── KXBTC15M (Kalshi BTC 15-min) signal pipeline ─────────────────
+    # Signal-only by default. Auto-execution is gated by TRADING_ENABLED
+    # AND KXBTC15M_AUTO_EXECUTE; both must be True before any order code
+    # path ever runs (and that code path is intentionally not wired up
+    # in v1 — flip these flags only after edge is established).
+    KXBTC15M_ENABLED: bool = False
+    KXBTC15M_AUTO_EXECUTE: bool = False
+    KXBTC15M_SCAN_INTERVAL_SECONDS: int = 300  # 5 min, same cadence as repo
+    KXBTC15M_MIN_EDGE: float = 0.03            # 3% minimum edge (repo default)
+    KXBTC15M_MAX_TRADE_SIZE: float = 15.0      # $ per signal — match weather cap
+    KXBTC15M_DAILY_LOSS_CAP: float = 20.0      # $ per day across all KXBTC15M trades
+    KXBTC15M_MAX_DRAWDOWN_PCT: float = 0.15    # bot pauses if equity drops 15%
+    KXBTC15M_MAX_TRADES_PER_DAY: int = 24
+    KXBTC15M_SEND_PASS_ALERTS: bool = False    # Only alert on actionable signals
+
+    # Anthropic — used by ROMA pipeline. Falls back to deterministic GBM
+    # heuristic if missing (pipeline still runs, just less informed).
+    ANTHROPIC_API_KEY: Optional[str] = None
+
+    # Separate webhook for BTC signals so it doesn't blend with weather.
+    DISCORD_BTC_WEBHOOK_URL: Optional[str] = None
+
     class Config:
         env_file = ".env"
 
