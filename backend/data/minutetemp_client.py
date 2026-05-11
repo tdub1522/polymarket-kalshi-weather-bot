@@ -142,8 +142,8 @@ async def fetch_minutetemp_forecast(
         member_highs: List[float] = []
         models_used: List[str] = []
         from datetime import timedelta
-        date_start_utc = f"{target_date.isoformat()}T06:00:00Z"
-        date_end_utc   = f"{(target_date + timedelta(days=1)).isoformat()}T05:00:00Z"
+        date_start_utc = f"{target_date.isoformat()}T00:00:00Z"
+        date_end_utc   = f"{(target_date + timedelta(days=1)).isoformat()}T12:00:00Z"
 
         for model_id in qualified_model_ids:
             temps_dict = model_forecasts.get(model_id, {})
