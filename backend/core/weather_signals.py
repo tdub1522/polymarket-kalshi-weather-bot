@@ -307,11 +307,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
     for city_key, target_date in city_date_pairs:
         cache_key = (city_key, target_date)
         try:
-            if settings.MINUTETEMP_ENABLED and settings.MINUTETEMP_API_KEY:
-                from backend.data.minutetemp_client import fetch_forecast as _mt_fetch
-                forecast = await _mt_fetch(city_key, target_date)
-            else:
-                forecast = await fetch_ensemble_forecast(city_key, target_date)
+            forecast = await fetch_ensemble_forecast(city_key, target_date)
             if forecast:
                 forecast_cache[cache_key] = forecast
                 logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.mean_high:.1f}F")
@@ -348,6 +344,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
 
     # Notify Discord — only when alerts are enabled and auto-trading is explicitly off
     if settings.DISCORD_ENABLED and not settings.TRADING_ENABLED:
+        from backend.data.minutetemp_client import _metar_highs
         for signal in actionable:
             await send_discord_signal({
                 "market_title": signal.market.title,
@@ -367,6 +364,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
                 "hist_win_rate": signal.hist_win_rate,
                 "yes_price_cents": signal.yes_price_cents,
                 "no_price_cents": signal.no_price_cents,
+                "current_metar_high": _metar_highs.get(signal.market.city_key),
             })
 
     # Persist signals to DB

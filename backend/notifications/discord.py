@@ -58,22 +58,28 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
     else:
         color = 0xff6600   # orange
 
+    fields = [
+        {"name": "Ticker",               "value": signal.get("ticker", "N/A"),                                                    "inline": True},
+        {"name": "Side",                 "value": signal.get("side", "N/A").upper(),                                              "inline": True},
+        {"name": "YES Price",            "value": f"{yes_cents}¢",                                                               "inline": True},
+        {"name": "NO Price",             "value": f"{no_cents}¢",                                                                  "inline": True},
+
+        {"name": "Expected Value",       "value": f"{signal.get('expected_value', 0) * 100:.1f}%",                                "inline": True},
+        {"name": "Historical Win Rate",  "value": f"{signal.get('hist_win_rate', 0) * 100:.1f}%",                                 "inline": True},
+        {"name": "Position Size",        "value": f"${signal.get('suggested_size', 0):.0f} (confidence: {signal.get('confidence', 0)*100:.0f}%)", "inline": True},
+        {"name": f"GFS Mean ({members} members)", "value": f"{ensemble_mean:.1f}°F",                                              "inline": True},
+        {"name": "GFS Std",              "value": f"±{ensemble_std:.1f}°F",                                                       "inline": True},
+        {"name": "GFS Distance",         "value": gfs_distance_label,                                                             "inline": True},
+    ]
+
+    current_metar_high = signal.get("current_metar_high")
+    if current_metar_high is not None:
+        fields.append({"name": "METAR High (now)", "value": f"{current_metar_high}°F", "inline": True})
+
     embed = {
         "title": signal.get("market_title", "Unknown Market"),
         "color": color,
-        "fields": [
-            {"name": "Ticker",               "value": signal.get("ticker", "N/A"),                                                    "inline": True},
-            {"name": "Side",                 "value": signal.get("side", "N/A").upper(),                                              "inline": True},
-            {"name": "YES Price",            "value": f"{yes_cents}¢",                                                               "inline": True},
-            {"name": "NO Price",             "value": f"{no_cents}¢",                                                                  "inline": True},
-
-            {"name": "Expected Value",       "value": f"{signal.get('expected_value', 0) * 100:.1f}%",                                "inline": True},
-            {"name": "Historical Win Rate",  "value": f"{signal.get('hist_win_rate', 0) * 100:.1f}%",                                 "inline": True},
-            {"name": "Position Size",        "value": f"${signal.get('suggested_size', 0):.0f} (confidence: {signal.get('confidence', 0)*100:.0f}%)", "inline": True},
-            {"name": f"GFS Mean ({members} members)", "value": f"{ensemble_mean:.1f}°F",                                              "inline": True},
-            {"name": "GFS Std",              "value": f"±{ensemble_std:.1f}°F",                                                       "inline": True},
-            {"name": "GFS Distance",         "value": gfs_distance_label,                                                             "inline": True},
-        ],
+        "fields": fields,
         "footer": {
             "text": "Manual trade required — bot does not auto-trade"
         },

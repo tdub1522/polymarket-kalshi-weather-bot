@@ -133,8 +133,9 @@ def _celsius_to_fahrenheit(c: float) -> float:
 
 async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = None) -> Optional[EnsembleForecast]:
     """
-    Fetch ensemble forecast from Open-Meteo using DWD ICON EPS Seamless (icon_seamless).
-    Returns per-member daily max temperatures in Fahrenheit.
+    Fetch ensemble forecast. Tries MinuteTemp first when MINUTETEMP_API_KEY is
+    configured; falls back to Open-Meteo ICON EPS Seamless.
+    Returns per-member daily max temperatures in Fahrenheit as EnsembleForecast.
     """
     if city_key not in CITY_CONFIG:
         logger.warning(f"Unknown city key: {city_key}")
@@ -150,6 +151,31 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
         if now - cached_time < _CACHE_TTL:
             return cached_forecast
 
+    # ── MinuteTemp (preferred when configured) ────────────────────────────────
+    from backend.config import settings as _settings
+    if _settings.MINUTETEMP_API_KEY:
+        try:
+            from backend.data.minutetemp_client import fetch_minutetemp_forecast
+            mt = await fetch_minutetemp_forecast(city_key, target_date)
+            if mt:
+                config = CITY_CONFIG[city_key]
+                forecast = EnsembleForecast(
+                    city_key=city_key,
+                    city_name=config["name"],
+                    target_date=target_date,
+                    member_highs=mt["member_highs"],
+                    member_lows=[],
+                    mean_high=mt["mean_high"],
+                    std_high=mt["std_high"],
+                    mean_low=0.0,
+                    std_low=0.0,
+                )
+                _forecast_cache[cache_key] = (now, forecast)
+                return forecast
+        except Exception as exc:
+            logger.warning(f"MinuteTemp forecast failed for {city_key}, falling back to Open-Meteo: {exc}")
+
+    # ── Open-Meteo ICON EPS fallback ─────────────────────────────────────────
     config = CITY_CONFIG[city_key]
     logger.info(f"Fetching ICON EPS ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
 
