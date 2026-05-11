@@ -139,19 +139,11 @@ async def fetch_minutetemp_forecast(
         qualified_model_ids = {s["model_id"] for s in qualified_models}
         model_forecasts = await fetch_station_forecast(station_id, target_date)
 
-        from datetime import timedelta
-        date_start = target_date.isoformat()
-        date_end = (target_date + timedelta(days=1)).isoformat()
-
         member_highs: List[float] = []
         models_used: List[str] = []
         for model_id in qualified_model_ids:
             temps_dict = model_forecasts.get(model_id, {})
-            daily_temps = [
-                v for k, v in temps_dict.items()
-                if (k.startswith(date_start) or k.startswith(date_end))
-                and v is not None
-            ]
+            daily_temps = [v for v in temps_dict.values() if v is not None]
             if daily_temps:
                 member_highs.append(max(daily_temps))
                 models_used.append(model_id)
@@ -159,6 +151,11 @@ async def fetch_minutetemp_forecast(
         if not member_highs:
             logger.warning(f"No forecast data for qualifying models in {city_key}")
             return None
+
+        logger.info(
+            f"MinuteTemp {city_key}: {len(member_highs)} models, "
+            f"mean={statistics.mean(member_highs):.1f}F"
+        )
 
         mean_high = statistics.mean(member_highs)
         std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
