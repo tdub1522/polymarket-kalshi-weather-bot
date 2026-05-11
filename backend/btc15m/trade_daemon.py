@@ -11,6 +11,7 @@ Timing:
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -121,6 +122,13 @@ async def _run_window(bankroll: float, daily_trades: int, daily_loss: float) -> 
 
 async def run_daemon(bankroll: float = 80.0) -> None:
     """Run forever, waking around each 15-min window. Ctrl-C to stop."""
+    pem_contents = os.getenv("KALSHI_PRIVATE_KEY_CONTENTS")
+    pem_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "/app/kalshi-prod.pem")
+    if pem_contents and not os.path.exists(pem_path):
+        os.makedirs(os.path.dirname(pem_path), exist_ok=True)
+        with open(pem_path, "w") as f:
+            f.write(pem_contents)
+
     daily_trades    = 0
     daily_loss      = 0.0
     last_reset_date = datetime.now(ET).date()

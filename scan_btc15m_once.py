@@ -53,6 +53,13 @@ def preflight() -> bool:
 
 
 async def main():
+    pem_contents = os.getenv("KALSHI_PRIVATE_KEY_CONTENTS")
+    pem_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "/app/kalshi-prod.pem")
+    if pem_contents and not os.path.exists(pem_path):
+        os.makedirs(os.path.dirname(pem_path), exist_ok=True)
+        with open(pem_path, "w") as f:
+            f.write(pem_contents)
+
     if not preflight():
         print("Missing required Kalshi credentials. Aborting.")
         sys.exit(2)
