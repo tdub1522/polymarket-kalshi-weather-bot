@@ -13,20 +13,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict
+from typing import Dict, List, Optional
 
 import httpx
 
 from backend.config import settings
-from .agents import ExecutionSignal
 
 logger = logging.getLogger("trading_bot")
 
 _recent: Dict[str, datetime] = {}
 
 
-def _color(signal: ExecutionSignal) -> int:
+@dataclass
+class Btc15mSignal:
+    recommendation: str
+    market: object          # Btc15mMarket
+    spot: float
+    p_yes: float
+    edge: float
+    market_implied_p: float
+    contracts: int = 0
+    notional_usd: float = 0.0
+    kelly_fraction: float = 0.0
+    confidence: float = 0.5
+    sentiment: Optional[object] = None
+    thesis: Optional[str] = None
+    risk_reasons: Optional[List[str]] = field(default_factory=list)
+
+
+def _color(signal: Btc15mSignal) -> int:
     if signal.recommendation == "PASS":
         return 0x808080
     if signal.confidence < 0.45:
@@ -36,7 +53,7 @@ def _color(signal: ExecutionSignal) -> int:
     return 0xd83b3b      # red — BUY_NO
 
 
-def _format_embed(signal: ExecutionSignal) -> dict:
+def _format_embed(signal: Btc15mSignal) -> dict:
     m = signal.market
     expiry_min = signal.market.seconds_to_expiry / 60
     edge_pct = signal.edge * 100
@@ -102,7 +119,7 @@ def _format_embed(signal: ExecutionSignal) -> dict:
     }
 
 
-async def send_btc15m_alert(signal: ExecutionSignal) -> bool:
+async def send_btc15m_alert(signal: Btc15mSignal) -> bool:
     """Post the signal to the BTC Discord webhook. Returns True if sent."""
     webhook = getattr(settings, "DISCORD_BTC_WEBHOOK_URL", None) or getattr(
         settings, "DISCORD_WEBHOOK_URL", None

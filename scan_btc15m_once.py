@@ -1,4 +1,4 @@
-"""Run a single KXBTC15M pipeline cycle and print the result.
+"""Run a single KXBTC15M Markov-chain pipeline cycle and print the result.
 
 Usage:
     python3 scan_btc15m_once.py
@@ -61,9 +61,9 @@ async def main():
     from backend.models.database import init_db
     init_db()
 
-    from backend.btc15m.pipeline import run_btc15m_pipeline
-    from backend.btc15m.discord_alerter import send_btc15m_alert
-    from backend.models.database import SessionLocal, BotState, Btc15mSignal
+    from backend.btc15m.pipeline import run_pipeline
+    from backend.btc15m.discord_alerter import Btc15mSignal, send_btc15m_alert
+    from backend.models.database import SessionLocal, BotState, Btc15mSignal as Btc15mSignalRow
     from backend.config import settings
 
     db = SessionLocal()
@@ -73,81 +73,115 @@ async def main():
     finally:
         db.close()
 
-    print(f"── Running pipeline (bankroll=${bankroll:.2f}) ──\n")
-    result = await run_btc15m_pipeline(
-        bankroll=bankroll,
-        daily_pnl=0.0,
-        drawdown_pct=0.0,
-        trades_today=0,
+    print(f"── Running Markov pipeline (bankroll=${bankroll:.2f}) ──\n")
+    result = await run_pipeline(bankroll=bankroll)
+
+    print("\n── Result ──")
+
+    # Fields to display in order; skip gracefully if absent.
+    _FIELDS = [
+        ("recommendation",   "Recommendation"),
+        ("reason",           "Reason"),
+        ("ticker",           "Ticker"),
+        ("strike",           "Strike"),
+        ("spot",             "Spot"),
+        ("time_left_seconds","Time left (s)"),
+        ("yes_ask",          "YES ask"),
+        ("no_ask",           "NO ask"),
+        ("p_yes",            "Model P(YES)"),
+        ("gap",              "Gap"),
+        ("persistence",      "Persistence"),
+        ("kelly_contracts",  "Kelly contracts"),
+        ("risk_reasons",     "Risk reasons"),
+    ]
+
+    # Flatten market fields into the display dict.
+    display: dict = dict(result)
+    market = result.get("market")
+    if market is not None:
+        display.setdefault("ticker",           market.market_ticker)
+        display.setdefault("strike",           market.floor_strike)
+        display.setdefault("yes_ask",          market.yes_ask)
+        display.setdefault("no_ask",           market.no_ask)
+        display.setdefault("time_left_seconds", market.seconds_to_expiry)
+    display.setdefault("kelly_contracts", display.get("contracts"))
+    display.setdefault("gap", (
+        abs(result["p_yes"] - 0.50) if "p_yes" in result else None
+    ))
+
+    for key, label in _FIELDS:
+        val = display.get(key)
+        if val is None:
+            continue
+        if key == "strike":
+            print(f"  {label:<20} ${val:,.2f}")
+        elif key == "spot":
+            print(f"  {label:<20} ${val:,.2f}")
+        elif key in ("p_yes", "gap", "persistence"):
+            print(f"  {label:<20} {val:.3f}")
+        elif key in ("yes_ask", "no_ask"):
+            print(f"  {label:<20} {val:.3f}")
+        elif key == "time_left_seconds":
+            print(f"  {label:<20} {val:.0f}s ({val/60:.1f} min)")
+        elif key == "risk_reasons" and isinstance(val, list):
+            print(f"  {label:<20} {', '.join(val) if val else '—'}")
+        else:
+            print(f"  {label:<20} {val}")
+
+    rec = result.get("recommendation", "PASS")
+    if rec == "PASS":
+        print("\n  No actionable signal this cycle.")
+        return
+
+    # Persist to DB.
+    if market is not None:
+        db = SessionLocal()
+        try:
+            row = Btc15mSignalRow(
+                market_ticker   = market.market_ticker,
+                event_ticker    = market.event_ticker,
+                floor_strike    = market.floor_strike,
+                close_time      = market.close_time,
+                spot            = result.get("spot", 0.0),
+                yes_ask         = market.yes_ask,
+                yes_bid         = market.yes_bid,
+                no_ask          = market.no_ask,
+                no_bid          = market.no_bid,
+                volume          = market.volume,
+                market_implied_p= result.get("market_implied_p", market.market_implied_p),
+                p_yes           = result.get("p_yes", 0.0),
+                edge            = result.get("edge", 0.0),
+                recommendation  = rec,
+                confidence      = result.get("confidence", 0.0),
+                contracts       = result.get("contracts", 0),
+                notional_usd    = result.get("notional_usd", 0.0),
+                kelly_fraction  = result.get("kelly_fraction", 0.0),
+                thesis          = result.get("thesis"),
+                risk_reasons    = result.get("risk_reasons", []),
+                auto_executed   = False,
+            )
+            db.add(row)
+            db.commit()
+            print(f"\n  Saved signal #{row.id} to btc15m_signals.")
+        finally:
+            db.close()
+
+    # Discord alert.
+    signal = Btc15mSignal(
+        recommendation   = rec,
+        market           = market,
+        spot             = result.get("spot", 0.0),
+        p_yes            = result.get("p_yes", 0.0),
+        edge             = result.get("edge", 0.0),
+        market_implied_p = result.get("market_implied_p", 0.0),
+        contracts        = result.get("contracts", 0),
+        notional_usd     = result.get("notional_usd", 0.0),
+        kelly_fraction   = result.get("kelly_fraction", 0.0),
+        confidence       = result.get("confidence", 0.0),
+        thesis           = result.get("thesis"),
+        risk_reasons     = result.get("risk_reasons", []),
     )
-
-    print(f"\n── Result ── ({result.elapsed_ms:.0f}ms, {result.markets_seen} markets seen)")
-    if result.error:
-        print(f"  ERROR: {result.error}")
-        return
-    if not result.signal:
-        print("  No signal this cycle (no tradeable strike near spot, or markets closed).")
-        return
-
-    sig = result.signal
-    m = sig.market
-    print(f"  Ticker:       {m.market_ticker}")
-    print(f"  Strike:       ${m.floor_strike:,.2f}")
-    print(f"  Spot:         ${sig.spot:,.2f}")
-    print(f"  Time left:    {m.seconds_to_expiry/60:.1f} min")
-    print(f"  YES bid/ask:  {m.yes_bid:.3f} / {m.yes_ask:.3f}")
-    print(f"  NO  bid/ask:  {m.no_bid:.3f} / {m.no_ask:.3f}")
-    print()
-    print(f"  Sentiment:        {sig.sentiment.label} ({sig.sentiment.score:+.2f}) "
-          f"momentum={sig.sentiment.momentum}")
-    print(f"  Model P(YES):     {sig.p_yes*100:.2f}%")
-    print(f"  Market P(YES):    {sig.market_implied_p*100:.2f}%")
-    print(f"  Edge:             {sig.edge*100:+.2f}%")
-    print(f"  Confidence:       {sig.confidence*100:.0f}%")
-    print(f"  Recommendation:   {sig.recommendation}")
-    if sig.recommendation != "PASS":
-        print(f"  Suggested size:   {sig.contracts} contracts (~${sig.notional_usd:.2f}, "
-              f"Kelly={sig.kelly_fraction:.3f})")
-    print(f"  Risk reasons:     {', '.join(sig.risk_reasons)}")
-    if sig.thesis:
-        print(f"\n  Thesis:\n    {sig.thesis[:600]}")
-
-    # Persist to DB (matches the scheduler's path).
-    db = SessionLocal()
-    try:
-        row = Btc15mSignal(
-            market_ticker=m.market_ticker,
-            event_ticker=m.event_ticker,
-            floor_strike=m.floor_strike,
-            close_time=m.close_time,
-            spot=sig.spot,
-            yes_ask=m.yes_ask,
-            yes_bid=m.yes_bid,
-            no_ask=m.no_ask,
-            no_bid=m.no_bid,
-            volume=m.volume,
-            market_implied_p=sig.market_implied_p,
-            p_yes=sig.p_yes,
-            edge=sig.edge,
-            recommendation=sig.recommendation,
-            confidence=sig.confidence,
-            contracts=sig.contracts,
-            notional_usd=sig.notional_usd,
-            kelly_fraction=sig.kelly_fraction,
-            sentiment_label=sig.sentiment.label,
-            sentiment_score=sig.sentiment.score,
-            thesis=sig.thesis,
-            key_drivers=sig.key_drivers,
-            risk_reasons=sig.risk_reasons,
-            auto_executed=False,
-        )
-        db.add(row)
-        db.commit()
-        print(f"\n  Saved signal #{row.id} to btc15m_signals.")
-    finally:
-        db.close()
-
-    sent = await send_btc15m_alert(sig)
+    sent = await send_btc15m_alert(signal)
     print(f"  Discord alert: {'sent' if sent else 'skipped'}")
 
 
