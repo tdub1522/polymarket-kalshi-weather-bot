@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .kalshi_market import fetch_active_btc15m_markets, pick_target_market
 from .markov.chain import STATES
-from .markov.history import build_history, fetch_1m_candles
+from .markov.history import build_history, compute_gk_vol, compute_hurst, fetch_1m_candles
 from .risk.manager import RiskManager
 
 _PASS = "PASS"
@@ -106,20 +106,51 @@ async def run_pipeline(
             "reason": f"gap {gap:.3f} < 0.11",
         }
 
-    # ── 7. Market discovery ───────────────────────────────────────────────────
+    # ── 7. Hurst exponent gate ────────────────────────────────────────────────
+    closes = [float(c["close"]) for c in candles if c.get("close")]
+    hurst = compute_hurst(closes)
+    logger.info("Hurst exponent: %.3f", hurst)
+    if hurst <= 0.55:
+        return {
+            "recommendation": _PASS,
+            "reason": f"Hurst {hurst:.3f} ≤ 0.55 — no trend",
+            "hurst": hurst,
+        }
+
+    # ── 8. Garman-Klass volatility gate ──────────────────────────────────────
+    gk_vol = compute_gk_vol(candles)
+    logger.info("GK volatility: %.4f", gk_vol)
+    if gk_vol < 0.0008:
+        return {
+            "recommendation": _PASS,
+            "reason": f"GK vol {gk_vol:.4f} < 0.0008 — market too quiet",
+            "hurst": hurst,
+            "gk_vol": gk_vol,
+        }
+    if gk_vol > 0.008:
+        return {
+            "recommendation": _PASS,
+            "reason": f"GK vol {gk_vol:.4f} > 0.008 — market too volatile",
+            "hurst": hurst,
+            "gk_vol": gk_vol,
+        }
+
+    # ── 9. Market discovery ───────────────────────────────────────────────────
     try:
         markets = await fetch_active_btc15m_markets()
     except Exception as exc:
-        return {"recommendation": _PASS, "reason": f"market fetch failed: {exc}"}
+        return {"recommendation": _PASS, "reason": f"market fetch failed: {exc}",
+                "hurst": hurst, "gk_vol": gk_vol}
 
     target = pick_target_market(markets, spot)
     if target is None:
-        return {"recommendation": _PASS, "reason": "no tradeable market near spot"}
+        return {"recommendation": _PASS, "reason": "no tradeable market near spot",
+                "hurst": hurst, "gk_vol": gk_vol}
 
     # Recompute p_yes against the actual strike.
     p_yes = chain.p_yes(target.floor_strike, spot, sigma)
 
-    # ── 8/9. Recommendation ───────────────────────────────────────────────────
+    # ── 10. Recommendation ────────────────────────────────────────────────────
     if p_yes > 0.61:
         recommendation = "BUY_YES"
     elif p_yes < 0.39:
@@ -128,9 +159,11 @@ async def run_pipeline(
         return {
             "recommendation": _PASS,
             "reason": f"p_yes {p_yes:.3f} in neutral zone [0.39, 0.61]",
+            "hurst": hurst,
+            "gk_vol": gk_vol,
         }
 
-    # ── 10. Risk gates ────────────────────────────────────────────────────────
+    # ── 11. Risk gates ────────────────────────────────────────────────────────
     risk = RiskManager(daily_trades=daily_trades, daily_loss=daily_loss)
     passed, risk_reasons = risk.check_all_gates(
         market=target,
@@ -145,9 +178,11 @@ async def run_pipeline(
             "recommendation": _PASS,
             "reason": "risk gate: " + "; ".join(risk_reasons),
             "risk_reasons": risk_reasons,
+            "hurst": hurst,
+            "gk_vol": gk_vol,
         }
 
-    # ── 11. Kelly sizing ──────────────────────────────────────────────────────
+    # ── 12. Kelly sizing ──────────────────────────────────────────────────────
     contracts = risk.kelly_contracts(
         p_yes=p_yes,
         yes_ask=target.yes_ask,
@@ -167,23 +202,26 @@ async def run_pipeline(
 
     thesis = (
         f"Markov dominant={STATES[dominant_state]} persistence={persistence:.3f} "
-        f"p_yes={p_yes:.3f} gap={gap:.3f} edge={edge:+.3f}"
+        f"p_yes={p_yes:.3f} gap={gap:.3f} hurst={hurst:.3f} gk_vol={gk_vol:.4f} "
+        f"edge={edge:+.3f}"
     )
 
-    # ── 12. Signal dict ───────────────────────────────────────────────────────
+    # ── 13. Signal dict ───────────────────────────────────────────────────────
     return {
-        "recommendation":  recommendation,
-        "p_yes":           p_yes,
-        "market":          target,
-        "spot":            spot,
-        "edge":            edge,
+        "recommendation":   recommendation,
+        "p_yes":            p_yes,
+        "market":           target,
+        "spot":             spot,
+        "edge":             edge,
         "market_implied_p": target.market_implied_p,
-        "contracts":       contracts,
-        "notional_usd":    notional_usd,
-        "kelly_fraction":  kelly_fraction,
-        "confidence":      persistence,
-        "thesis":          thesis,
-        "risk_reasons":    [],
-        "dominant_state":  STATES[dominant_state],
-        "persistence":     persistence,
+        "contracts":        contracts,
+        "notional_usd":     notional_usd,
+        "kelly_fraction":   kelly_fraction,
+        "confidence":       persistence,
+        "thesis":           thesis,
+        "risk_reasons":     [],
+        "dominant_state":   STATES[dominant_state],
+        "persistence":      persistence,
+        "hurst":            hurst,
+        "gk_vol":           gk_vol,
     }

@@ -92,6 +92,8 @@ async def main():
         ("gap",              "Gap"),
         ("persistence",      "Persistence"),
         ("kelly_contracts",  "Kelly contracts"),
+        ("hurst",            "Hurst exponent"),
+        ("gk_vol",           "GK volatility"),
         ("risk_reasons",     "Risk reasons"),
     ]
 
@@ -117,8 +119,10 @@ async def main():
             print(f"  {label:<20} ${val:,.2f}")
         elif key == "spot":
             print(f"  {label:<20} ${val:,.2f}")
-        elif key in ("p_yes", "gap", "persistence"):
+        elif key in ("p_yes", "gap", "persistence", "hurst"):
             print(f"  {label:<20} {val:.3f}")
+        elif key == "gk_vol":
+            print(f"  {label:<20} {val:.4f}")
         elif key in ("yes_ask", "no_ask"):
             print(f"  {label:<20} {val:.3f}")
         elif key == "time_left_seconds":

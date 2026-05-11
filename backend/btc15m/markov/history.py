@@ -1,6 +1,8 @@
 """Build Markov history from 1-min candles and fetch candles from Coinbase Exchange."""
 from __future__ import annotations
 
+import math
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import List
 
@@ -30,6 +32,83 @@ def build_history(candles: List[dict]) -> MarkovChain:
         prev_state = state
 
     return chain
+
+
+def compute_hurst(closes: List[float]) -> float:
+    """R/S analysis (rescaled range) Hurst exponent.
+
+    H > 0.55  → trending (pass filter)
+    H < 0.45  → mean-reverting (block)
+    0.45–0.55 → random walk (block)
+    Returns 0.5 if there is insufficient data (<20 prices).
+    """
+    if len(closes) < 20:
+        return 0.5
+
+    n = len(closes)
+    period = n // 4
+    rs_values: List[float] = []
+
+    for start in range(0, 4 * period, period):
+        sub = closes[start: start + period]
+        if len(sub) < 2:
+            continue
+        mean = sum(sub) / len(sub)
+        deviations = [x - mean for x in sub]
+        cumdev: List[float] = []
+        running = 0.0
+        for d in deviations:
+            running += d
+            cumdev.append(running)
+        r = max(cumdev) - min(cumdev)
+        try:
+            s = statistics.stdev(sub)
+        except statistics.StatisticsError:
+            continue
+        if s > 0:
+            rs_values.append(r / s)
+
+    if not rs_values:
+        return 0.5
+
+    mean_rs = sum(rs_values) / len(rs_values)
+    if mean_rs <= 0 or period <= 1:
+        return 0.5
+
+    h = math.log(mean_rs) / math.log(period)
+    return max(0.0, min(1.0, h))
+
+
+def compute_gk_vol(candles: List[dict]) -> float:
+    """Garman-Klass volatility estimator from OHLC candles.
+
+    Returns sqrt(mean GK) — a raw vol estimate (not annualized).
+    Returns 0.002 baseline if fewer than 10 candles are provided.
+    """
+    if len(candles) < 10:
+        return 0.002
+
+    gk_values: List[float] = []
+    for c in candles:
+        try:
+            o = float(c["open"])
+            h = float(c["high"])
+            l = float(c["low"])
+            cl = float(c["close"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
+            continue
+        hl = math.log(h / l)
+        co = math.log(cl / o)
+        gk = 0.5 * hl ** 2 - (2 * math.log(2) - 1) * co ** 2
+        if gk >= 0:
+            gk_values.append(gk)
+
+    if not gk_values:
+        return 0.002
+
+    return math.sqrt(sum(gk_values) / len(gk_values))
 
 
 async def fetch_1m_candles(n: int = 60) -> List[dict]:
