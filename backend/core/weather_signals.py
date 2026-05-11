@@ -129,7 +129,7 @@ async def generate_weather_signal(
     std_val  = forecast.std_high  if market.metric == "high" else forecast.std_low
 
     if std_val > 1.0:
-        logger.debug(f"Skipping {market.market_id} — GFS std {std_val:.1f}F exceeds 1.0F threshold")
+        logger.info(f"SKIP {market.market_id}: std {std_val:.1f}F > 1.0F threshold")
         return None
 
     # Determine signal type and temperature-based edge
@@ -137,26 +137,27 @@ async def generate_weather_signal(
         signal_type = "T-above"
         edge_f = mean_val - market.threshold_f
         if mean_val <= market.threshold_f + 3.0:
-            logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within 3.0F of threshold {market.threshold_f:.0f}F")
+            logger.info(f"SKIP {market.market_id}: T-above GFS {mean_val:.1f}F within 3.0F of threshold {market.threshold_f:.0f}F")
             return None
     elif market.direction == "above":
         if mean_val > market.threshold_f + 0.5:
             signal_type = "B-above"
             edge_f = mean_val - (market.threshold_f + 0.5)
             if edge_f < 1.0:
-                logger.debug(f"Skipping {market.market_id} — B-above edge {edge_f:.1f}F below 1.0F minimum")
+                logger.info(f"SKIP {market.market_id}: B-above edge {edge_f:.1f}F below 1.0F minimum")
                 return None
         elif mean_val < market.threshold_f - 0.5:
             signal_type = "B-below"
             bottom_of_range = market.threshold_f - 0.5
             edge_f = bottom_of_range - mean_val
             if mean_val >= bottom_of_range - 3.0:
-                logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within 3.0F of bracket bottom {bottom_of_range:.1f}F")
+                logger.info(f"SKIP {market.market_id}: B-below GFS {mean_val:.1f}F within 3.0F of bracket bottom {bottom_of_range:.1f}F")
                 return None
         else:
-            logger.debug(f"Skipping {market.market_id} — GFS {mean_val:.1f}F within bracket range")
+            logger.info(f"SKIP {market.market_id}: GFS {mean_val:.1f}F within bracket range [{market.threshold_f - 0.5:.1f}–{market.threshold_f + 0.5:.1f}F]")
             return None
     else:
+        logger.info(f"SKIP {market.market_id}: unknown direction '{market.direction}'")
         return None
 
     # Always trade NO
@@ -165,9 +166,12 @@ async def generate_weather_signal(
     yes_price_cents = round(market.yes_price * 100)
     no_price_cents = round(market.no_price * 100)
 
-    # Entry price filter
+    # Entry price filters
+    if market.yes_price > 0.30:
+        logger.info(f"SKIP {market.market_id}: YES price {market.yes_price:.0%} > 30% (NO too cheap for edge)")
+        return None
     if no_price > settings.WEATHER_MAX_ENTRY_PRICE:
-        logger.debug(f"Skipping {market.market_id} — NO price {no_price:.0%} above max entry")
+        logger.info(f"SKIP {market.market_id}: NO price {no_price:.0%} above max entry {settings.WEATHER_MAX_ENTRY_PRICE:.0%}")
         return None
 
     # Historical win rate and EV
@@ -221,6 +225,9 @@ async def generate_weather_signal(
 
     signal.models_used = forecast.get("models_used", [])
     signal.current_metar_high = forecast.get("current_metar_high")
+
+    if not signal.passes_threshold:
+        logger.info(f"SKIP {market.market_id}: passes_threshold=False (edge={edge_f:.1f}F EV={expected_value*100:.1f}%)")
 
     filter_status = "ACTIONABLE" if signal.passes_threshold else "FILTERED"
     signal.reasoning = (
