@@ -141,9 +141,17 @@ async def fetch_minutetemp_forecast(
 
         member_highs: List[float] = []
         models_used: List[str] = []
+        from datetime import timedelta
+        date_start_utc = f"{target_date.isoformat()}T06:00:00Z"
+        date_end_utc   = f"{(target_date + timedelta(days=1)).isoformat()}T05:00:00Z"
+
         for model_id in qualified_model_ids:
             temps_dict = model_forecasts.get(model_id, {})
-            daily_temps = [v for v in temps_dict.values() if v is not None]
+            daily_temps = [
+                v for k, v in temps_dict.items()
+                if date_start_utc <= k <= date_end_utc
+                and v is not None
+            ]
             if daily_temps:
                 member_highs.append(max(daily_temps))
                 models_used.append(model_id)
