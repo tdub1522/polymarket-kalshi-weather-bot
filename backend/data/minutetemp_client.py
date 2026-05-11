@@ -1,14 +1,15 @@
-"""MinuteTemp API client — settlement-grade ASOS weather forecasts and observations.
+"""MinuteTemp API client — oracle-ranked ASOS weather forecasts and observations.
 
-fetch_minutetemp_forecast() is the primary entry point; weather.py calls it and
-wraps the result into EnsembleForecast so the rest of the pipeline is unchanged.
+The oracle-score endpoint ranks models by recent accuracy; only models with
+abs(high_bias) < 1.0 F are used when building the ensemble average, so the
+signal reflects the most accurate models available for each station.
 """
 from __future__ import annotations
 
 import logging
 import statistics
 from datetime import date
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -19,69 +20,107 @@ logger = logging.getLogger("trading_bot")
 BASE_URL = "https://api.minutetemp.com/api/v1"
 
 CITY_STATION_MAP: Dict[str, dict] = {
-    "nyc":          {"station_id": "KNYC", "slug": "nyc", "name": "New York"},
-    "chicago":      {"station_id": "KMDW", "slug": "chi", "name": "Chicago"},
-    "miami":        {"station_id": "KMIA", "slug": "mia", "name": "Miami"},
-    "los_angeles":  {"station_id": "KLAX", "slug": "lax", "name": "Los Angeles"},
-    "denver":       {"station_id": "KDEN", "slug": "den", "name": "Denver"},
-    "philadelphia": {"station_id": "KPHL", "slug": "phl", "name": "Philadelphia"},
+    "nyc":          {"station_id": "KNYC", "slug": "nyc"},
+    "chicago":      {"station_id": "KMDW", "slug": "chi"},
+    "miami":        {"station_id": "KMIA", "slug": "mia"},
+    "los_angeles":  {"station_id": "KLAX", "slug": "lax"},
+    "denver":       {"station_id": "KDEN", "slug": "den"},
+    "philadelphia": {"station_id": "KPHL", "slug": "phl"},
 }
 
-# Module-level cache so Discord can pull the latest running high without an extra API call.
-_metar_highs: Dict[str, Optional[float]] = {}
+_API_HEADERS = lambda: {"X-API-Key": settings.MINUTETEMP_API_KEY or ""}
 
 
-class MinuteTempClient:
-    def __init__(self):
-        self.api_key = settings.MINUTETEMP_API_KEY
-        self.headers = {"X-API-Key": self.api_key}
+async def fetch_oracle_scores(station_id: str, mode: str) -> List[dict]:
+    """Fetch oracle model scores for a station.
 
-    async def get_forecast(self, station_id: str) -> Optional[dict]:
-        """Fetch forecast from all 20 models for a station.
+    mode: "day_of" or "day_ahead"
+    Returns models with abs(high_bias) < 1.0, sorted by high_mae ascending.
+    """
+    params = {
+        "rank_by": "high_mae",
+        "mode":    mode,
+        "window":  "7d",
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{BASE_URL}/stations/{station_id}/oracle-scores",
+            headers=_API_HEADERS(),
+            params=params,
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
-        GET /api/v1/stations/{station_id}/forecast
-        """
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"{BASE_URL}/stations/{station_id}/forecast",
-                headers=self.headers,
-            )
-            resp.raise_for_status()
-            return resp.json()
+    scores = data.get("data", {}).get("scores", [])
+    qualified = [s for s in scores if abs(s.get("high_bias", 999)) < 1.0]
 
-    async def get_latest_observation(self, station_id: str) -> Optional[dict]:
-        """Fetch latest METAR observation including running daily high.
-
-        GET /api/v1/stations/{station_id}/observations/latest
-        """
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"{BASE_URL}/stations/{station_id}/observations/latest",
-                headers=self.headers,
-            )
-            resp.raise_for_status()
-            return resp.json()
-
-    async def get_oracle_scores(self, station_id: str) -> Optional[dict]:
-        """Fetch oracle model accuracy scores to find the best-performing model.
-
-        GET /api/v1/stations/{station_id}/oracle-scores
-        """
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"{BASE_URL}/stations/{station_id}/oracle-scores",
-                headers=self.headers,
-            )
-            resp.raise_for_status()
-            return resp.json()
+    logger.info(
+        f"Oracle scores {station_id} ({mode}): "
+        f"{len(qualified)}/{len(scores)} models qualify (|high_bias| < 1.0): "
+        f"{[s['model_name'] for s in qualified]}"
+    )
+    return qualified
 
 
-async def fetch_minutetemp_forecast(city_key: str, target_date: date) -> Optional[dict]:
-    """Fetch forecast for a city using MinuteTemp API.
+async def fetch_station_forecast(
+    station_id: str,
+    target_date: Optional[date] = None,
+) -> Dict[str, List[float]]:
+    """Fetch all model forecasts for a station.
 
-    Returns a dict with mean_high, std_high, num_members, member_highs,
-    current_metar_high (running daily high from METAR), mean_low, std_low.
-    Falls back to None if MinuteTemp is not configured or the fetch fails.
+    Returns dict keyed by model_id -> list of hourly temps (F) for target_date.
+    If target_date is None, all hourly temps are returned.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{BASE_URL}/stations/{station_id}/forecast",
+            headers=_API_HEADERS(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    date_prefix = str(target_date) if target_date else None
+    model_forecasts: Dict[str, List[float]] = {}
+    for bundle in data.get("data", {}).get("forecasts", []):
+        model_id = bundle.get("model_id")
+        temps = [
+            h.get("temperature_2m_f")
+            for h in bundle.get("hourly", [])
+            if h.get("temperature_2m_f") is not None
+            and (date_prefix is None or date_prefix in str(h.get("time", "")))
+        ]
+        if temps and model_id:
+            model_forecasts[model_id] = temps
+
+    return model_forecasts
+
+
+async def fetch_latest_observation(station_id: str) -> Optional[float]:
+    """Fetch latest METAR observation running daily high.
+
+    Returns daily_high_f or None.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{BASE_URL}/stations/{station_id}/observations/latest",
+            headers=_API_HEADERS(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    return data.get("data", {}).get("daily_high_f")
+
+
+async def fetch_minutetemp_forecast(
+    city_key: str,
+    target_date: date,
+    is_today: bool = True,
+) -> Optional[dict]:
+    """Main entry point. Fetches oracle scores, filters by bias, averages
+    qualifying model forecasts, and returns an ensemble result dict.
+
+    is_today=True  -> use day_of oracle scores
+    is_today=False -> use day_ahead oracle scores
     """
     if not settings.MINUTETEMP_API_KEY:
         return None
@@ -91,43 +130,44 @@ async def fetch_minutetemp_forecast(city_key: str, target_date: date) -> Optiona
         return None
 
     station_id = city_config["station_id"]
-    client = MinuteTempClient()
+    mode = "day_of" if is_today else "day_ahead"
 
     try:
-        forecast_data = await client.get_forecast(station_id)
+        qualified_models = await fetch_oracle_scores(station_id, mode)
+        if not qualified_models:
+            logger.warning(f"No qualifying models for {city_key} ({mode})")
+            return None
 
-        member_highs: list[float] = []
-        if forecast_data and "data" in forecast_data:
-            bundles = forecast_data["data"].get("forecasts", [])
-            for bundle in bundles:
-                hourly = bundle.get("hourly", [])
-                if hourly:
-                    temps = [
-                        h.get("temperature_2m_f")
-                        for h in hourly
-                        if h.get("temperature_2m_f") is not None
-                    ]
-                    if temps:
-                        member_highs.append(max(temps))
+        qualified_model_ids = {s["model_id"] for s in qualified_models}
+        model_forecasts = await fetch_station_forecast(station_id, target_date)
+
+        member_highs: List[float] = []
+        models_used: List[str] = []
+        for model_id in qualified_model_ids:
+            temps = model_forecasts.get(model_id)
+            if temps:
+                member_highs.append(max(temps))
+                models_used.append(model_id)
 
         if not member_highs:
+            logger.warning(f"No forecast data for qualifying models in {city_key}")
             return None
 
         mean_high = statistics.mean(member_highs)
         std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
 
-        obs_data = await client.get_latest_observation(station_id)
-        current_metar_high: Optional[float] = None
-        if obs_data and "data" in obs_data:
-            obs = obs_data["data"]
-            current_metar_high = obs.get("daily_high_f")
-
-        _metar_highs[city_key] = current_metar_high
+        metar_high: Optional[float] = None
+        if is_today:
+            try:
+                metar_high = await fetch_latest_observation(station_id)
+            except Exception as exc:
+                logger.debug(f"METAR fetch failed for {station_id}: {exc}")
 
         logger.info(
-            f"MinuteTemp {city_key} ({station_id}): "
+            f"MinuteTemp {city_key} ({mode}): "
             f"mean={mean_high:.1f}F std={std_high:.1f}F "
-            f"models={len(member_highs)} metar_high={current_metar_high}F"
+            f"models={len(member_highs)} ({models_used}) "
+            f"metar_high={metar_high}"
         )
 
         return {
@@ -135,7 +175,8 @@ async def fetch_minutetemp_forecast(city_key: str, target_date: date) -> Optiona
             "std_high":           std_high,
             "num_members":        len(member_highs),
             "member_highs":       member_highs,
-            "current_metar_high": current_metar_high,
+            "models_used":        models_used,
+            "current_metar_high": metar_high,
             "mean_low":           None,
             "std_low":            None,
         }
@@ -148,24 +189,28 @@ async def fetch_minutetemp_forecast(city_key: str, target_date: date) -> Optiona
 async def fetch_current_observation(city_key: str) -> Optional[dict]:
     """Fetch the current METAR observation and running daily high/low for a city.
 
+    Used by the GET /api/weather/observations endpoint.
     Returns a dict with current_temp_f, daily_high_f, daily_low_f, timestamp,
     station_id — or None on error.
     """
     city = CITY_STATION_MAP.get(city_key)
     if not city:
-        logger.warning(f"MinuteTemp: unknown city key '{city_key}'")
         return None
 
     station_id = city["station_id"]
-    client = MinuteTempClient()
-
     try:
-        resp_data = await client.get_latest_observation(station_id)
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/stations/{station_id}/observations/latest",
+                headers=_API_HEADERS(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
     except Exception as exc:
         logger.warning(f"MinuteTemp observation fetch failed for {city_key}: {exc}")
         return None
 
-    obs_data = resp_data.get("data", {}) if resp_data else {}
+    obs_data = data.get("data", {}) if data else {}
     observation = obs_data.get("observation", {})
 
     return {
