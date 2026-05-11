@@ -4,8 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python run.py",
-    "healthcheckPath": "/api/health",
+    "startCommand": "python backend/btc15m/trade_daemon.py",
     "restartPolicyType": "ON_FAILURE"
   }
 }
