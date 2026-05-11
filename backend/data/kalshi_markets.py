@@ -173,15 +173,14 @@ async def fetch_kalshi_weather_markets(
                     if parsed["target_date"] < today:
                         continue
 
-                    logger.info("Close time filter disabled for debugging")
-                    # close_time_str = m.get("close_time", "")
-                    # if close_time_str:
-                    #     close_time = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
-                    #     now = datetime.now(timezone.utc)
-                    #     hours_until_close = (close_time - now).total_seconds() / 3600
-                    #     if hours_until_close > 24 or hours_until_close < 0:
-                    #         continue
-                    #     logger.info(f"{ticker} closes in {hours_until_close:.1f}h")
+                    close_time_str = m.get("close_time", "")
+                    if close_time_str:
+                        close_time = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
+                        now = datetime.now(timezone.utc)
+                        hours_until_close = (close_time - now).total_seconds() / 3600
+                        if hours_until_close > 48 or hours_until_close < 0:
+                            continue
+                        logger.info(f"{ticker} closes in {hours_until_close:.1f}h")
 
                     candidates.append({
                         "ticker": ticker,
