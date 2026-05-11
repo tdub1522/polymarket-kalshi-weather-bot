@@ -1,9 +1,12 @@
 """KXBTC15M Markov-chain pipeline — signal-only, no order placement."""
 from __future__ import annotations
 
+import logging
 import math
 import statistics
+from datetime import datetime
 from typing import Any, Dict
+from zoneinfo import ZoneInfo
 
 from .kalshi_market import fetch_active_btc15m_markets, pick_target_market
 from .markov.chain import STATES
@@ -11,6 +14,27 @@ from .markov.history import build_history, fetch_1m_candles
 from .risk.manager import RiskManager
 
 _PASS = "PASS"
+_ET   = ZoneInfo("America/New_York")
+logger = logging.getLogger("trading_bot")
+
+
+def _within_active_hours() -> bool:
+    """Return True if the current ET time is within allowed trading hours.
+
+    Blocked windows:
+      - Saturday 00:00 ET through Sunday 18:00 ET (weekend market closure)
+      - Any day outside 07:00–21:59 ET
+    """
+    now     = datetime.now(_ET)
+    weekday = now.weekday()   # 0=Mon … 5=Sat, 6=Sun
+    hour    = now.hour
+
+    if weekday == 5:          # Saturday — always blocked
+        return False
+    if weekday == 6:          # Sunday — blocked before 18:00 ET
+        if hour < 18:
+            return False
+    return 7 <= hour < 22
 
 
 def _sigma_approx(candles: list, spot: float, steps: int = 15) -> float:
@@ -35,6 +59,11 @@ async def run_pipeline(
     daily_loss: float = 0.0,
 ) -> Dict[str, Any]:
     """Run one full Markov-chain pipeline cycle. Returns a signal dict."""
+
+    # ── 0. Active-hours gate ─────────────────────────────────────────────────
+    if not _within_active_hours():
+        logger.info("Scan skipped — outside active hours")
+        return {"recommendation": _PASS, "reason": "outside active hours"}
 
     # ── 1. Candles ───────────────────────────────────────────────────────────
     try:
