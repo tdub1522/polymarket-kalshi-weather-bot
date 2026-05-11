@@ -79,18 +79,16 @@ async def fetch_station_forecast(
         resp.raise_for_status()
         data = resp.json()
 
-    date_prefix = str(target_date) if target_date else None
-    model_forecasts: Dict[str, List[float]] = {}
+    model_forecasts: Dict[str, Dict[str, float]] = {}
     for bundle in data.get("data", {}).get("forecasts", []):
         model_id = bundle.get("model_id")
-        temps = [
-            h.get("temperature_2m_f")
-            for h in bundle.get("hourly", [])
-            if h.get("temperature_2m_f") is not None
-            and (date_prefix is None or date_prefix in str(h.get("time", "")))
-        ]
-        if temps and model_id:
-            model_forecasts[model_id] = temps
+        hourly = bundle.get("hourly", [])
+        if model_id:
+            model_forecasts[model_id] = {
+                h["time"]: h["temperature_2m_f"]
+                for h in hourly
+                if h.get("temperature_2m_f") is not None and h.get("time")
+            }
 
     return model_forecasts
 
@@ -141,12 +139,18 @@ async def fetch_minutetemp_forecast(
         qualified_model_ids = {s["model_id"] for s in qualified_models}
         model_forecasts = await fetch_station_forecast(station_id, target_date)
 
+        date_str = target_date.isoformat()
+
         member_highs: List[float] = []
         models_used: List[str] = []
         for model_id in qualified_model_ids:
-            temps = model_forecasts.get(model_id)
-            if temps:
-                member_highs.append(max(temps))
+            temps_dict = model_forecasts.get(model_id, {})
+            daily_temps = [
+                v for k, v in temps_dict.items()
+                if k.startswith(date_str) and v is not None
+            ]
+            if daily_temps:
+                member_highs.append(max(daily_temps))
                 models_used.append(model_id)
 
         if not member_highs:
