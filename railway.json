@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python backend/btc15m/trade_daemon.py",
+    "startCommand": "cd /app && python -m backend.btc15m.trade_daemon",
     "restartPolicyType": "ON_FAILURE"
   }
 }
