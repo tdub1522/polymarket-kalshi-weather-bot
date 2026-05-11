@@ -158,6 +158,7 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
             from backend.data.minutetemp_client import fetch_minutetemp_forecast
             mt = await fetch_minutetemp_forecast(city_key, target_date)
             if mt:
+                logger.info(f"[MinuteTemp] {city_key} {target_date}: mean={mt['mean_high']:.1f}F models={mt.get('num_members', 0)}")
                 config = CITY_CONFIG[city_key]
                 forecast = EnsembleForecast(
                     city_key=city_key,
@@ -176,6 +177,7 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
             logger.warning(f"MinuteTemp forecast failed for {city_key}, falling back to Open-Meteo: {exc}")
 
     # ── Open-Meteo ICON EPS fallback ─────────────────────────────────────────
+    logger.info(f"[Open-Meteo ICON] {city_key} {target_date}: fetching ensemble")
     config = CITY_CONFIG[city_key]
     logger.info(f"Fetching ICON EPS ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
 
