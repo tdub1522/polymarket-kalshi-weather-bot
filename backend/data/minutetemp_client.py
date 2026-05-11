@@ -139,7 +139,9 @@ async def fetch_minutetemp_forecast(
         qualified_model_ids = {s["model_id"] for s in qualified_models}
         model_forecasts = await fetch_station_forecast(station_id, target_date)
 
-        date_str = target_date.isoformat()
+        from datetime import timedelta
+        date_start = target_date.isoformat()
+        date_end = (target_date + timedelta(days=1)).isoformat()
 
         member_highs: List[float] = []
         models_used: List[str] = []
@@ -147,7 +149,8 @@ async def fetch_minutetemp_forecast(
             temps_dict = model_forecasts.get(model_id, {})
             daily_temps = [
                 v for k, v in temps_dict.items()
-                if k.startswith(date_str) and v is not None
+                if (k.startswith(date_start) or k.startswith(date_end))
+                and v is not None
             ]
             if daily_temps:
                 member_highs.append(max(daily_temps))
