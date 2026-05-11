@@ -100,6 +100,8 @@ class WeatherTradingSignal:
     yes_price_cents: int = 0
     no_price_cents: int = 0
     signal_type: str = ""
+    models_used: List[str] = field(default_factory=list)
+    current_metar_high: Optional[float] = None
 
     @property
     def passes_threshold(self) -> bool:
@@ -216,6 +218,9 @@ async def generate_weather_signal(
         no_price_cents=no_price_cents,
         signal_type=signal_type,
     )
+
+    signal.models_used = forecast.get("models_used", [])
+    signal.current_metar_high = forecast.get("current_metar_high")
 
     filter_status = "ACTIONABLE" if signal.passes_threshold else "FILTERED"
     signal.reasoning = (
@@ -344,7 +349,6 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
 
     # Notify Discord — only when alerts are enabled and auto-trading is explicitly off
     if settings.DISCORD_ENABLED and not settings.TRADING_ENABLED:
-        from backend.data.minutetemp_client import _metar_highs
         for signal in actionable:
             await send_discord_signal({
                 "market_title": signal.market.title,
@@ -364,7 +368,8 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
                 "hist_win_rate": signal.hist_win_rate,
                 "yes_price_cents": signal.yes_price_cents,
                 "no_price_cents": signal.no_price_cents,
-                "current_metar_high": _metar_highs.get(signal.market.city_key),
+                "models_used": signal.models_used,
+                "current_metar_high": signal.current_metar_high,
             })
 
     # Persist signals to DB
