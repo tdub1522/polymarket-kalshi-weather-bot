@@ -307,7 +307,11 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
     for city_key, target_date in city_date_pairs:
         cache_key = (city_key, target_date)
         try:
-            forecast = await fetch_ensemble_forecast(city_key, target_date)
+            if settings.MINUTETEMP_ENABLED and settings.MINUTETEMP_API_KEY:
+                from backend.data.minutetemp_client import fetch_forecast as _mt_fetch
+                forecast = await _mt_fetch(city_key, target_date)
+            else:
+                forecast = await fetch_ensemble_forecast(city_key, target_date)
             if forecast:
                 forecast_cache[cache_key] = forecast
                 logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.mean_high:.1f}F")

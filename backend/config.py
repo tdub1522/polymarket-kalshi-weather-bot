@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # Separate webhook for BTC signals so it doesn't blend with weather.
     DISCORD_BTC_WEBHOOK_URL: Optional[str] = None
 
+    # MinuteTemp API — settlement-grade ASOS weather forecasts and observations.
+    # When MINUTETEMP_ENABLED=True and MINUTETEMP_API_KEY is set, the weather
+    # pipeline uses MinuteTemp instead of Open-Meteo as the forecast source.
+    MINUTETEMP_API_KEY: Optional[str] = None
+    MINUTETEMP_ENABLED: bool = False
+
     class Config:
         env_file = ".env"
 

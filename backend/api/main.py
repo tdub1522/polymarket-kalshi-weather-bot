@@ -182,6 +182,16 @@ class WeatherMarketResponse(BaseModel):
     volume: float
 
 
+class WeatherObservationResponse(BaseModel):
+    city_key: str
+    city_name: str
+    station_id: str
+    current_temp_f: Optional[float]
+    daily_high_f: Optional[float]
+    daily_low_f: Optional[float]
+    timestamp: Optional[str]
+
+
 class WeatherSignalResponse(BaseModel):
     market_id: str
     city_key: str
@@ -747,6 +757,30 @@ async def get_weather_signals():
         return [_weather_signal_to_response(s) for s in signals]
     except Exception:
         return []
+
+
+@app.get("/api/weather/observations", response_model=List[WeatherObservationResponse])
+async def get_weather_observations():
+    """Get current METAR observations and running daily highs for all cities."""
+    from backend.data.minutetemp_client import CITY_STATION_MAP, fetch_current_observation
+
+    results = []
+    for city_key, meta in CITY_STATION_MAP.items():
+        try:
+            obs = await fetch_current_observation(city_key)
+            if obs:
+                results.append(WeatherObservationResponse(
+                    city_key=city_key,
+                    city_name=meta["name"],
+                    station_id=meta["station_id"],
+                    current_temp_f=obs.get("current_temp_f"),
+                    daily_high_f=obs.get("daily_high_f"),
+                    daily_low_f=obs.get("daily_low_f"),
+                    timestamp=obs.get("timestamp"),
+                ))
+        except Exception:
+            pass
+    return results
 
 
 def _weather_signal_to_response(s) -> WeatherSignalResponse:
