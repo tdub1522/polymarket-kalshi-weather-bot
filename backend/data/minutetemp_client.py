@@ -157,8 +157,17 @@ async def fetch_minutetemp_forecast(
                 and v is not None
             ]
             if daily_temps:
+                logger.info(
+                    f"  {model_id}: {len(temps_dict)} total hours, "
+                    f"{len(daily_temps)} in window [{date_start_utc} to {date_end_utc}], "
+                    f"max={max(daily_temps):.1f}F"
+                )
                 member_highs.append(max(daily_temps))
                 models_used.append(model_id)
+            else:
+                logger.info(
+                    f"  {model_id}: {len(temps_dict)} total hours, 0 in window"
+                )
 
         if not member_highs:
             logger.warning(f"No forecast data for qualifying models in {city_key}")
