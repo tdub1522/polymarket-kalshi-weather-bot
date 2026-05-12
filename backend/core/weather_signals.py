@@ -128,6 +128,10 @@ async def generate_weather_signal(
     mean_val = forecast.mean_high if market.metric == "high" else forecast.mean_low
     std_val  = forecast.std_high  if market.metric == "high" else forecast.std_low
 
+    if std_val > 2.0:
+        logger.info(f"SKIP {market.market_id}: MT Oracle std {std_val:.1f}F > 2.0F threshold")
+        return None
+
     # Determine signal type and temperature-based edge
     if market.direction == "below":
         signal_type = "T-above"

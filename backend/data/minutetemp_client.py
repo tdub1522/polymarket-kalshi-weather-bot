@@ -52,7 +52,11 @@ async def fetch_oracle_scores(station_id: str, mode: str) -> List[dict]:
         data = resp.json()
 
     scores = data.get("data", {}).get("scores", [])
-    qualified = [s for s in scores if abs(s.get("high_bias", 999)) < 1.0]
+    qualified = [
+        s for s in scores
+        if abs(s.get("high_bias", 999)) < 1.0
+        and s.get("high_mae", 999) < 2.0
+    ]
 
     logger.info(
         f"Oracle scores {station_id} ({mode}): "
