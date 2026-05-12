@@ -366,7 +366,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
             logger.debug(f"Weather signal generation failed for {market.title}: {e}")
 
     # Sort by absolute edge
-    signals.sort(key=lambda s: abs(s.edge), reverse=True)
+    signals.sort(key=lambda s: (s.market.target_date, -abs(s.edge)))
 
     actionable = [s for s in signals if s.passes_threshold]
     logger.info(f"WEATHER SCAN COMPLETE: {len(signals)} signals, {len(actionable)} actionable")
