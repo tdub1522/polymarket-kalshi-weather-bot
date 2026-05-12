@@ -1,4 +1,5 @@
 """Signal generator for weather temperature markets using ensemble forecasts."""
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
