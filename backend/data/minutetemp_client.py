@@ -6,6 +6,7 @@ signal reflects the most accurate models available for each station.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import statistics
 from datetime import date
@@ -136,6 +137,7 @@ async def fetch_minutetemp_forecast(
 
     try:
         qualified_models = await fetch_oracle_scores(station_id, mode)
+        await asyncio.sleep(0.5)
         if not qualified_models:
             logger.warning(f"No qualifying models for {city_key} ({mode})")
             return None
