@@ -120,13 +120,13 @@ async def generate_weather_signal(
     - Compare to market price to find edge
     - Size using Kelly criterion
     """
-    if not forecast or not forecast.get("member_highs"):
+    if not forecast or not forecast.member_highs:
         logger.debug(f"No forecast available for {market.market_id} ({market.city_key} on {market.target_date}) — skipping")
         return None
 
     # Ensemble stats
-    mean_val = forecast.get("mean_high", 0.0) if market.metric == "high" else forecast.get("mean_low", 0.0)
-    std_val  = forecast.get("std_high", 0.0)  if market.metric == "high" else forecast.get("std_low", 0.0)
+    mean_val = forecast.mean_high if market.metric == "high" else forecast.mean_low
+    std_val  = forecast.std_high  if market.metric == "high" else forecast.std_low
 
     # Determine signal type and temperature-based edge
     if market.direction == "below":
@@ -175,7 +175,7 @@ async def generate_weather_signal(
     expected_value = hist_win_rate - no_price  # positive if hist WR beats NO cost
 
     # Ensemble probability (used for confidence and sizing)
-    members = forecast.get("member_highs", []) if market.metric == "high" else forecast.get("member_lows", [])
+    members = forecast.member_highs if market.metric == "high" else forecast.member_lows
     if not members:
         logger.info(f"SKIP {market.market_id}: no ensemble members in forecast")
         return None
@@ -211,10 +211,10 @@ async def generate_weather_signal(
         confidence=confidence,
         kelly_fraction=suggested_size / bankroll if bankroll > 0 else 0,
         suggested_size=suggested_size,
-        sources=[f"minutetemp_{forecast.get('num_members', 0)}m"],
+        sources=[f"minutetemp_{forecast.num_members}m"],
         ensemble_mean=mean_val,
         ensemble_std=std_val,
-        ensemble_members=forecast.get("num_members", 0),
+        ensemble_members=forecast.num_members,
         expected_value=expected_value,
         hist_win_rate=hist_win_rate,
         yes_price_cents=yes_price_cents,
@@ -222,8 +222,8 @@ async def generate_weather_signal(
         signal_type=signal_type,
     )
 
-    signal.models_used = forecast.get("models_used", [])
-    signal.current_metar_high = forecast.get("current_metar_high")
+    signal.models_used = getattr(forecast, "models_used", [])
+    signal.current_metar_high = getattr(forecast, "current_metar_high", None)
 
     if not signal.passes_threshold:
         logger.info(f"SKIP {market.market_id}: passes_threshold=False (edge={edge_f:.1f}F EV={expected_value*100:.1f}%)")
@@ -232,7 +232,7 @@ async def generate_weather_signal(
     signal.reasoning = (
         f"[{filter_status}] [{signal_type}] "
         f"{market.city_name} {market.metric} {market.direction} {market.threshold_f:.0f}F on {market.target_date} | "
-        f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.get('num_members', 0)} members) | "
+        f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.num_members} members) | "
         f"Edge: {edge_f:.1f}°F | EV: {expected_value*100:.1f}% | "
         f"NO cost: {no_price*100:.0f}¢ | Hist WR: {hist_win_rate*100:.1f}%"
     )
@@ -321,7 +321,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
             forecast = await fetch_ensemble_forecast(city_key, target_date)
             if forecast:
                 forecast_cache[cache_key] = forecast
-                logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.get('mean_high', 0.0):.1f}F")
+                logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.mean_high:.1f}F")
         except Exception as e:
             logger.warning(f"Failed to pre-fetch ensemble for {city_key} {target_date}: {e}")
 

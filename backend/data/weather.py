@@ -84,6 +84,8 @@ class EnsembleForecast:
     std_low: float = 0.0
     num_members: int = 0
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    models_used: List[str] = field(default_factory=list)
+    current_metar_high: Optional[float] = None
 
     def __post_init__(self):
         if self.member_highs:
@@ -170,6 +172,8 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
                     std_high=mt["std_high"],
                     mean_low=0.0,
                     std_low=0.0,
+                    models_used=mt.get("models_used", []),
+                    current_metar_high=mt.get("current_metar_high"),
                 )
                 _forecast_cache[cache_key] = (now, forecast)
                 return forecast
