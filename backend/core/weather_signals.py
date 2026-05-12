@@ -120,20 +120,20 @@ async def generate_weather_signal(
     - Compare to market price to find edge
     - Size using Kelly criterion
     """
-    if not forecast or not forecast.member_highs:
+    if not forecast or not forecast.get("member_highs"):
         logger.debug(f"No forecast available for {market.market_id} ({market.city_key} on {market.target_date}) — skipping")
         return None
 
     # Ensemble stats
-    mean_val = forecast.mean_high if market.metric == "high" else forecast.mean_low
-    std_val  = forecast.std_high  if market.metric == "high" else forecast.std_low
+    mean_val = forecast.get("mean_high", 0.0) if market.metric == "high" else forecast.get("mean_low", 0.0)
+    std_val  = forecast.get("std_high", 0.0)  if market.metric == "high" else forecast.get("std_low", 0.0)
 
     # Determine signal type and temperature-based edge
     if market.direction == "below":
         signal_type = "T-above"
         edge_f = mean_val - market.threshold_f
         if mean_val <= market.threshold_f + 3.0:
-            logger.info(f"SKIP {market.market_id}: T-above GFS {mean_val:.1f}F within 3.0F of threshold {market.threshold_f:.0f}F")
+            logger.info(f"SKIP {market.market_id}: T-above MT {mean_val:.1f}F within 3.0F of threshold {market.threshold_f:.0f}F")
             return None
     elif market.direction == "above":
         if mean_val > market.threshold_f + 0.5:
@@ -147,10 +147,10 @@ async def generate_weather_signal(
             bottom_of_range = market.threshold_f - 0.5
             edge_f = bottom_of_range - mean_val
             if mean_val >= bottom_of_range - 3.0:
-                logger.info(f"SKIP {market.market_id}: B-below GFS {mean_val:.1f}F within 3.0F of bracket bottom {bottom_of_range:.1f}F")
+                logger.info(f"SKIP {market.market_id}: B-below MT {mean_val:.1f}F within 3.0F of bracket bottom {bottom_of_range:.1f}F")
                 return None
         else:
-            logger.info(f"SKIP {market.market_id}: GFS {mean_val:.1f}F within bracket range [{market.threshold_f - 0.5:.1f}–{market.threshold_f + 0.5:.1f}F]")
+            logger.info(f"SKIP {market.market_id}: MT {mean_val:.1f}F within bracket range [{market.threshold_f - 0.5:.1f}–{market.threshold_f + 0.5:.1f}F]")
             return None
     else:
         logger.info(f"SKIP {market.market_id}: unknown direction '{market.direction}'")
@@ -175,13 +175,16 @@ async def generate_weather_signal(
     expected_value = hist_win_rate - no_price  # positive if hist WR beats NO cost
 
     # Ensemble probability (used for confidence and sizing)
-    members = forecast.member_highs if market.metric == "high" else forecast.member_lows
+    members = forecast.get("member_highs", []) if market.metric == "high" else forecast.get("member_lows", [])
+    if not members:
+        logger.info(f"SKIP {market.market_id}: no ensemble members in forecast")
+        return None
     if market.direction == "above":
         low = market.threshold_f - 0.5
         high = market.threshold_f + 0.5
         model_yes_prob = len([m for m in members if low <= m <= high]) / len(members)
     else:
-        model_yes_prob = forecast.probability_high_below(market.threshold_f) if market.metric == "high" else forecast.probability_low_below(market.threshold_f)
+        model_yes_prob = len([m for m in members if m < market.threshold_f]) / len(members) if members else 0.5
     model_yes_prob = max(0.05, min(0.95, model_yes_prob))
     market_yes_prob = market.yes_price
 
@@ -208,10 +211,10 @@ async def generate_weather_signal(
         confidence=confidence,
         kelly_fraction=suggested_size / bankroll if bankroll > 0 else 0,
         suggested_size=suggested_size,
-        sources=[f"open_meteo_ensemble_{forecast.num_members}m"],
+        sources=[f"minutetemp_{forecast.get('num_members', 0)}m"],
         ensemble_mean=mean_val,
         ensemble_std=std_val,
-        ensemble_members=forecast.num_members,
+        ensemble_members=forecast.get("num_members", 0),
         expected_value=expected_value,
         hist_win_rate=hist_win_rate,
         yes_price_cents=yes_price_cents,
@@ -229,7 +232,7 @@ async def generate_weather_signal(
     signal.reasoning = (
         f"[{filter_status}] [{signal_type}] "
         f"{market.city_name} {market.metric} {market.direction} {market.threshold_f:.0f}F on {market.target_date} | "
-        f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.num_members} members) | "
+        f"Ensemble: {mean_val:.1f}F +/- {std_val:.1f}F ({forecast.get('num_members', 0)} members) | "
         f"Edge: {edge_f:.1f}°F | EV: {expected_value*100:.1f}% | "
         f"NO cost: {no_price*100:.0f}¢ | Hist WR: {hist_win_rate*100:.1f}%"
     )
