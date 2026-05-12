@@ -321,7 +321,7 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
             forecast = await fetch_ensemble_forecast(city_key, target_date)
             if forecast:
                 forecast_cache[cache_key] = forecast
-                logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.mean_high:.1f}F")
+                logger.info(f"Cached forecast for {city_key} on {target_date}: {forecast.get('mean_high', 0.0):.1f}F")
         except Exception as e:
             logger.warning(f"Failed to pre-fetch ensemble for {city_key} {target_date}: {e}")
 
