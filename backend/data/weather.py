@@ -134,11 +134,7 @@ def _celsius_to_fahrenheit(c: float) -> float:
 
 
 async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = None) -> Optional[EnsembleForecast]:
-    """
-    Fetch ensemble forecast. Tries MinuteTemp first when MINUTETEMP_API_KEY is
-    configured; falls back to Open-Meteo ICON EPS Seamless.
-    Returns per-member daily max temperatures in Fahrenheit as EnsembleForecast.
-    """
+    """Fetch MinuteTemp oracle ensemble forecast. Returns None if unavailable."""
     if city_key not in CITY_CONFIG:
         logger.warning(f"Unknown city key: {city_key}")
         return None
@@ -153,114 +149,36 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
         if now - cached_time < _CACHE_TTL:
             return cached_forecast
 
-    # ── MinuteTemp (preferred when configured) ────────────────────────────────
     from backend.config import settings as _settings
-    if _settings.MINUTETEMP_API_KEY:
-        try:
-            from backend.data.minutetemp_client import fetch_minutetemp_forecast
-            mt = await fetch_minutetemp_forecast(city_key, target_date)
-            if mt:
-                logger.info(f"[MinuteTemp] {city_key} {target_date}: mean={mt['mean_high']:.1f}F models={mt.get('num_members', 0)}")
-                config = CITY_CONFIG[city_key]
-                forecast = EnsembleForecast(
-                    city_key=city_key,
-                    city_name=config["name"],
-                    target_date=target_date,
-                    member_highs=mt["member_highs"],
-                    member_lows=[],
-                    mean_high=mt["mean_high"],
-                    std_high=mt["std_high"],
-                    mean_low=0.0,
-                    std_low=0.0,
-                    models_used=mt.get("models_used", []),
-                    current_metar_high=mt.get("current_metar_high"),
-                )
-                _forecast_cache[cache_key] = (now, forecast)
-                return forecast
-        except Exception as exc:
-            logger.warning(f"MinuteTemp forecast failed for {city_key}, falling back to Open-Meteo: {exc}")
-
-    # ── Open-Meteo ICON EPS fallback ─────────────────────────────────────────
-    logger.info(f"[Open-Meteo ICON] {city_key} {target_date}: fetching ensemble")
-    config = CITY_CONFIG[city_key]
-    logger.info(f"Fetching ICON EPS ensemble for {city_key} using {config['station']} ({config['location']}) at lat={config['lat']}, lon={config['lon']}")
-
-    member_highs: List[float] = []
-    member_lows: List[float] = []
+    from backend.data.minutetemp_client import fetch_minutetemp_forecast
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            params = {
-                "latitude": config["lat"],
-                "longitude": config["lon"],
-                "hourly": "temperature_2m",
-                "temperature_unit": "fahrenheit",
-                "timezone": "America/New_York",
-                "start_date": target_date.isoformat(),
-                "end_date": target_date.isoformat(),
-                "models": "icon_seamless",
-            }
-            response = await client.get(
-                "https://ensemble-api.open-meteo.com/v1/ensemble",
-                params=params,
-            )
-            response.raise_for_status()
-            data = response.json()
+        mt = await fetch_minutetemp_forecast(city_key, target_date)
+        if not mt:
+            logger.warning(f"MinuteTemp returned no data for {city_key} on {target_date}")
+            return None
 
-            hourly = data.get("hourly", {})
-            logger.info(f"ICON EPS response keys: {list(hourly.keys())[:5]}")
+        logger.info(f"[MinuteTemp] {city_key} {target_date}: mean={mt['mean_high']:.1f}F models={mt.get('num_members', 0)}")
+        config = CITY_CONFIG[city_key]
+        forecast = EnsembleForecast(
+            city_key=city_key,
+            city_name=config["name"],
+            target_date=target_date,
+            member_highs=mt["member_highs"],
+            member_lows=[],
+            mean_high=mt["mean_high"],
+            std_high=mt["std_high"],
+            mean_low=0.0,
+            std_low=0.0,
+            models_used=mt.get("models_used", []),
+            current_metar_high=mt.get("current_metar_high"),
+        )
+        _forecast_cache[cache_key] = (now, forecast)
+        return forecast
 
-            for key, values in hourly.items():
-                if "temperature_2m" in key and values:
-                    valid = [v for v in values if v is not None]
-                    if valid:
-                        member_highs.append(max(valid))
-                        member_lows.append(min(valid))
-
-            logger.info(f"ICON EPS members found: {len(member_highs)}")
-
-    except Exception as e:
-        logger.warning(f"Failed to fetch ICON EPS ensemble for {city_key}: {e}")
-
-    logger.info(f"Total members combined: {len(member_highs)}")
-    logger.info(f"Sample member highs: {member_highs[:5]}")
-
-    if not member_highs:
-        logger.warning(f"No ensemble members found for {city_key} on {target_date}")
+    except Exception as exc:
+        logger.warning(f"MinuteTemp forecast failed for {city_key}: {exc}")
         return None
-
-    initial_mean_high = statistics.mean(member_highs)
-    initial_std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
-    filtered_highs = [m for m in member_highs if abs(m - initial_mean_high) <= 2 * initial_std_high]
-    mean_high = statistics.mean(filtered_highs)
-    std_high = statistics.stdev(filtered_highs) if len(filtered_highs) > 1 else 0.0
-    logger.info(f"High temp filtering: {len(filtered_highs)}/{len(member_highs)} members within 2 std")
-
-    initial_mean_low = statistics.mean(member_lows) if member_lows else 0.0
-    initial_std_low = statistics.stdev(member_lows) if len(member_lows) > 1 else 0.0
-    filtered_lows = [m for m in member_lows if abs(m - initial_mean_low) <= 2 * initial_std_low] if member_lows else []
-    mean_low = statistics.mean(filtered_lows) if filtered_lows else 0.0
-    std_low = statistics.stdev(filtered_lows) if len(filtered_lows) > 1 else 0.0
-    logger.info(f"Low temp filtering: {len(filtered_lows)}/{len(member_lows)} members within 2 std")
-
-    forecast = EnsembleForecast(
-        city_key=city_key,
-        city_name=config["name"],
-        target_date=target_date,
-        member_highs=filtered_highs,
-        member_lows=filtered_lows,
-        mean_high=mean_high,
-        std_high=std_high,
-        mean_low=mean_low,
-        std_low=std_low,
-    )
-
-    _forecast_cache[cache_key] = (now, forecast)
-    logger.info(f"Ensemble forecast for {config['name']} on {target_date}: "
-                f"High {forecast.mean_high:.1f}F +/- {forecast.std_high:.1f}F "
-                f"({forecast.num_members} members total)")
-
-    return forecast
 
 
 async def fetch_nws_observed_temperature(city_key: str, target_date: Optional[date] = None) -> Optional[Dict[str, float]]:
