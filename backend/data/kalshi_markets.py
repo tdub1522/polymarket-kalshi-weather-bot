@@ -189,6 +189,7 @@ async def fetch_kalshi_weather_markets(
                         "parsed": parsed,
                         "title": m.get("title", ticker),
                     })
+                    logger.info(f"Candidate added: {ticker} closes in {hours_until_close:.1f}h")
 
                 cursor = data.get("cursor")
                 if not cursor or not raw_markets:
