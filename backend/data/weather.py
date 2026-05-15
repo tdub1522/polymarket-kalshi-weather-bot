@@ -133,6 +133,32 @@ def _celsius_to_fahrenheit(c: float) -> float:
     return c * 9.0 / 5.0 + 32.0
 
 
+def _log_forecast_history(city_key: str, target_date: date,
+                           forecast: EnsembleForecast, source: str) -> None:
+    import json
+    from backend.models.database import SessionLocal, ForecastHistory
+    db = SessionLocal()
+    try:
+        record = ForecastHistory(
+            city_key=city_key,
+            station_id=CITY_CONFIG.get(city_key, {}).get("station", ""),
+            target_date=target_date.isoformat(),
+            mean_high=forecast.mean_high,
+            std_high=forecast.std_high,
+            num_members=forecast.num_members,
+            models_used=json.dumps(getattr(forecast, "models_used", [])),
+            member_highs=json.dumps([round(h, 2) for h in forecast.member_highs]),
+            forecast_source=source,
+        )
+        db.add(record)
+        db.commit()
+    except Exception as e:
+        logger.debug(f"Failed to log forecast history: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = None) -> Optional[EnsembleForecast]:
     """Fetch MinuteTemp oracle ensemble forecast. Returns None if unavailable."""
     if city_key not in CITY_CONFIG:
@@ -174,6 +200,7 @@ async def fetch_ensemble_forecast(city_key: str, target_date: Optional[date] = N
             current_metar_high=mt.get("current_metar_high"),
         )
         _forecast_cache[cache_key] = (now, forecast)
+        _log_forecast_history(city_key, target_date, forecast, "minutetemp")
         return forecast
 
     except Exception as exc:

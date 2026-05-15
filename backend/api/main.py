@@ -11,7 +11,7 @@ import os
 from backend.config import settings
 from backend.models.database import (
     get_db, init_db, SessionLocal,
-    Signal, Trade, BotState, AILog, ScanLog, LiveSignal
+    Signal, Trade, BotState, AILog, ScanLog, LiveSignal, ForecastHistory
 )
 from backend.core.signals import scan_for_signals, TradingSignal
 from backend.data.btc_markets import fetch_active_btc_markets, BtcMarket
@@ -1111,6 +1111,35 @@ async def websocket_events(websocket: WebSocket):
         ws_manager.disconnect(websocket)
     except Exception:
         ws_manager.disconnect(websocket)
+
+
+@app.get("/api/forecast-history")
+def get_forecast_history(city_key: str = None, target_date: str = None):
+    db = SessionLocal()
+    try:
+        query = db.query(ForecastHistory).order_by(ForecastHistory.logged_at.desc())
+        if city_key:
+            query = query.filter(ForecastHistory.city_key == city_key)
+        if target_date:
+            query = query.filter(ForecastHistory.target_date == target_date)
+        records = query.limit(200).all()
+        return [
+            {
+                "city_key":        r.city_key,
+                "station_id":      r.station_id,
+                "target_date":     r.target_date,
+                "mean_high":       r.mean_high,
+                "std_high":        r.std_high,
+                "num_members":     r.num_members,
+                "models_used":     json.loads(r.models_used or "[]"),
+                "member_highs":    json.loads(r.member_highs or "[]"),
+                "forecast_source": r.forecast_source,
+                "logged_at":       str(r.logged_at),
+            }
+            for r in records
+        ]
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

@@ -240,6 +240,28 @@ class Btc15mSignal(Base):
     auto_executed = Column(Boolean, default=False)
 
 
+class ForecastHistory(Base):
+    __tablename__ = "forecast_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Identification
+    city_key = Column(String, nullable=False, index=True)
+    station_id = Column(String, nullable=False)
+    target_date = Column(String, nullable=False)
+
+    # Forecast values
+    mean_high = Column(Float, nullable=False)
+    std_high = Column(Float, nullable=False)
+    num_members = Column(Integer, nullable=False)
+    models_used = Column(String, nullable=True)   # JSON string of model list
+    member_highs = Column(String, nullable=True)  # JSON string of individual forecasts
+
+    # Timing
+    forecast_source = Column(String, nullable=False)  # "minutetemp" or "icon_eps"
+    logged_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
