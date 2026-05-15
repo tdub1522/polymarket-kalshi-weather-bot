@@ -55,10 +55,12 @@ async def fetch_oracle_scores(station_id: str, mode: str) -> List[dict]:
     scores = data.get("data", {}).get("scores", [])
     qualified = sorted(scores, key=lambda s: s.get("high_mae", 999))[:5]
 
+    model_summary = ", ".join(
+        f"{s['model_name']} ({s['high_mae']:.2f})" for s in qualified
+    )
     logger.info(
         f"Oracle scores {station_id} (day_of 7d): "
-        f"top 5 by MAE selected: "
-        f"{[f'{s[\"model_name\"]} ({s[\"high_mae\"]:.2f})' for s in qualified]}"
+        f"top 5 by MAE selected: {model_summary}"
     )
     return qualified
 
