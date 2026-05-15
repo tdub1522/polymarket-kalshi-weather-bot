@@ -1,6 +1,6 @@
 """Discord webhook notifications for trade signals."""
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -8,7 +8,15 @@ import logging
 logger = logging.getLogger("trading_bot")
 
 from backend.config import settings
-from backend.core.weather_signals import CITY_PREDICTABILITY
+
+CITY_PREDICTABILITY = {
+    "miami":        {"rank": 1, "mae": 1.44},
+    "denver":       {"rank": 2, "mae": 1.57},
+    "chicago":      {"rank": 3, "mae": 1.74},
+    "los_angeles":  {"rank": 4, "mae": 1.96},
+    "philadelphia": {"rank": 5, "mae": 1.98},
+    "nyc":          {"rank": 6, "mae": 2.21},
+}
 
 _recently_sent: dict[str, datetime] = {}
 
@@ -21,7 +29,7 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
         return
 
     ticker = signal.get("ticker", "")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if ticker in _recently_sent:
         time_since_last = now - _recently_sent[ticker]
