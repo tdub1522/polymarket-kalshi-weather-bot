@@ -53,16 +53,17 @@ async def fetch_oracle_scores(station_id: str, mode: str) -> List[dict]:
         data = resp.json()
 
     scores = data.get("data", {}).get("scores", [])
-    qualified = [
+    bias_qualified = [
         s for s in scores
         if abs(s.get("high_bias", 999)) < 1.0
-        and s.get("high_mae", 999) < 2.0
     ]
+    qualified = sorted(bias_qualified, key=lambda s: s.get("high_mae", 999))[:5]
 
     logger.info(
-        f"Oracle scores {station_id} ({mode}): "
-        f"{len(qualified)}/{len(scores)} models qualify (|high_bias| < 1.0): "
-        f"{[s['model_name'] for s in qualified]}"
+        f"Oracle scores {station_id} (day_of 7d): "
+        f"{len(qualified)}/5 models selected | "
+        f"bias filtered: {len(scores) - len(bias_qualified)} | "
+        f"selected: {[s['model_name'] for s in qualified]}"
     )
     return qualified
 
@@ -133,7 +134,7 @@ async def fetch_minutetemp_forecast(
         return None
 
     station_id = city_config["station_id"]
-    mode = "day_of" if is_today else "day_ahead"
+    mode = "day_of"
 
     try:
         qualified_models = await fetch_oracle_scores(station_id, mode)
@@ -175,27 +176,21 @@ async def fetch_minutetemp_forecast(
             logger.warning(f"No forecast data for qualifying models in {city_key}")
             return None
 
-        logger.info(
-            f"MinuteTemp {city_key}: {len(member_highs)} models, "
-            f"mean={statistics.mean(member_highs):.1f}F"
-        )
-
         mean_high = statistics.mean(member_highs)
         std_high = statistics.stdev(member_highs) if len(member_highs) > 1 else 0.0
 
-        metar_high: Optional[float] = None
-        if is_today:
-            try:
-                metar_high = await fetch_latest_observation(station_id)
-            except Exception as exc:
-                logger.debug(f"METAR fetch failed for {station_id}: {exc}")
-
         logger.info(
-            f"MinuteTemp {city_key} ({mode}): "
+            f"MinuteTemp {city_key} (day_of top5): "
             f"mean={mean_high:.1f}F std={std_high:.1f}F "
-            f"models={len(member_highs)} ({models_used}) "
-            f"metar_high={metar_high}"
+            f"from {len(member_highs)} models: "
+            f"{dict(zip(models_used, [round(h, 1) for h in member_highs]))}"
         )
+
+        metar_high: Optional[float] = None
+        try:
+            metar_high = await fetch_latest_observation(station_id)
+        except Exception as exc:
+            logger.debug(f"METAR fetch failed for {station_id}: {exc}")
 
         return {
             "mean_high":          mean_high,
