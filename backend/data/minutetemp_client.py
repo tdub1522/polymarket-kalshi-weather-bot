@@ -53,29 +53,20 @@ async def fetch_oracle_scores(station_id: str, mode: str) -> List[dict]:
         data = resp.json()
 
     scores = data.get("data", {}).get("scores", [])
-    bias_qualified = [
-        s for s in scores
-        if abs(s.get("high_bias", 999)) < 1.0
-    ]
-    qualified = sorted(bias_qualified, key=lambda s: s.get("high_mae", 999))[:5]
+    qualified = sorted(scores, key=lambda s: s.get("high_mae", 999))[:5]
 
     logger.info(
         f"Oracle scores {station_id} (day_of 7d): "
-        f"{len(qualified)}/5 models selected | "
-        f"bias filtered: {len(scores) - len(bias_qualified)} | "
-        f"selected: {[s['model_name'] for s in qualified]}"
+        f"top 5 by MAE selected: "
+        f"{[f'{s[\"model_name\"]} ({s[\"high_mae\"]:.2f})' for s in qualified]}"
     )
     return qualified
 
 
-async def fetch_station_forecast(
-    station_id: str,
-    target_date: Optional[date] = None,
-) -> Dict[str, List[float]]:
+async def fetch_station_forecast(station_id: str) -> Dict[str, List[float]]:
     """Fetch all model forecasts for a station.
 
-    Returns dict keyed by model_id -> list of hourly temps (F) for target_date.
-    If target_date is None, all hourly temps are returned.
+    Returns dict keyed by model_id -> {time_str: temp_f} for all hours returned.
     """
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
@@ -118,14 +109,8 @@ async def fetch_latest_observation(station_id: str) -> Optional[float]:
 async def fetch_minutetemp_forecast(
     city_key: str,
     target_date: date,
-    is_today: bool = True,
 ) -> Optional[dict]:
-    """Main entry point. Fetches oracle scores, filters by bias, averages
-    qualifying model forecasts, and returns an ensemble result dict.
-
-    is_today=True  -> use day_of oracle scores
-    is_today=False -> use day_ahead oracle scores
-    """
+    """Fetch top-5 oracle models by MAE and return an ensemble forecast dict."""
     if not settings.MINUTETEMP_API_KEY:
         return None
 
@@ -144,7 +129,7 @@ async def fetch_minutetemp_forecast(
             return None
 
         qualified_model_ids = {s["model_id"] for s in qualified_models}
-        model_forecasts = await fetch_station_forecast(station_id, target_date)
+        model_forecasts = await fetch_station_forecast(station_id)
 
         member_highs: List[float] = []
         models_used: List[str] = []
