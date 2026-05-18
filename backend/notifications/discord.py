@@ -10,6 +10,7 @@ logger = logging.getLogger("trading_bot")
 from backend.config import settings
 
 _recently_sent: dict[str, datetime] = {}
+_distribution_recently_sent: dict = {}
 
 
 async def send_discord_signal(signal: dict[str, Any]) -> None:
@@ -104,10 +105,10 @@ async def send_distribution_signal(signal: dict) -> None:
     ticker = signal.get("target_ticker", "")
     now = datetime.now(timezone.utc)
 
-    if ticker in _recently_sent:
-        if now - _recently_sent[ticker] < timedelta(hours=1):
+    if ticker in _distribution_recently_sent:
+        if now - _distribution_recently_sent[ticker] < timedelta(hours=1):
             return
-    _recently_sent[ticker] = now
+    _distribution_recently_sent[ticker] = now
 
     city = signal.get("city_name", "")
     mean = signal.get("mean", 0)
