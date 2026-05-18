@@ -27,16 +27,17 @@ MODEL_ID_ALIASES = {
 }
 
 CITY_STATION_MAP: Dict[str, dict] = {
-    "nyc":          {"station_id": "KNYC", "slug": "nyc"},
-    "chicago":      {"station_id": "KMDW", "slug": "chi"},
-    "miami":        {"station_id": "KMIA", "slug": "mia"},
     "los_angeles":  {"station_id": "KLAX", "slug": "lax"},
+    "chicago":      {"station_id": "KMDW", "slug": "chi"},
     "denver":       {"station_id": "KDEN", "slug": "den"},
-    "philadelphia":  {"station_id": "KPHL", "slug": "phl"},
-    "san_francisco": {"station_id": "KSFO", "slug": "sfo"},
-    "minneapolis":   {"station_id": "KMSP", "slug": "msp"},
-    "phoenix":       {"station_id": "KPHX", "slug": "phx"},
-    "houston":       {"station_id": "KHOU", "slug": "hou"},
+    "dallas":       {"station_id": "KDFW", "slug": "dal"},
+    "houston":      {"station_id": "KHOU", "slug": "hou"},
+    "las_vegas":    {"station_id": "KLAS", "slug": "las"},
+    "minneapolis":  {"station_id": "KMSP", "slug": "msp"},
+    "new_orleans":  {"station_id": "KMSY", "slug": "msy"},
+    "philadelphia": {"station_id": "KPHL", "slug": "phl"},
+    "san_antonio":  {"station_id": "KSAT", "slug": "sat"},
+    "washington_dc":{"station_id": "KDCA", "slug": "dca"},
 }
 
 _API_HEADERS = lambda: {"X-API-Key": settings.MINUTETEMP_API_KEY or ""}

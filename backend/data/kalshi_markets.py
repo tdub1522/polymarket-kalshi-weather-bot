@@ -13,33 +13,31 @@ logger = logging.getLogger("trading_bot")
 
 # Kalshi series tickers for high-temperature markets by city
 CITY_SERIES: Dict[str, str] = {
-    "nyc":           "KXHIGHNY",
-    "chicago":       "KXHIGHCHI",
-    "miami":         "KXHIGHMIA",
-    "los_angeles":   "KXHIGHLAX",
-    "denver":        "KXHIGHDEN",
-    "boston":        "KXHIGHBOS",
-    "philadelphia":  "KXHIGHPHIL",
-    "atlanta":       "KXHIGHATL",
-    "san_francisco": "KXHIGHTSFO",
-    "minneapolis":   "KXHIGHTMIN",
-    "phoenix":       "KXHIGHTPHX",
-    "houston":       "KXHIGHTHOU",
+    "los_angeles":  "KXHIGHLAX",
+    "chicago":      "KXHIGHCHI",
+    "denver":       "KXHIGHDEN",
+    "dallas":       "KXHIGHTDAL",
+    "houston":      "KXHIGHTHOU",
+    "las_vegas":    "KXHIGHTLV",
+    "minneapolis":  "KXHIGHTMIN",
+    "new_orleans":  "KXHIGHTNOLA",
+    "philadelphia": "KXHIGHPHIL",
+    "san_antonio":  "KXHIGHTSATX",
+    "washington_dc":"KXHIGHTDC",
 }
 
 CITY_NAMES: Dict[str, str] = {
-    "nyc":           "New York",
-    "chicago":       "Chicago",
-    "miami":         "Miami",
-    "los_angeles":   "Los Angeles",
-    "denver":        "Denver",
-    "boston":        "Boston",
-    "philadelphia":  "Philadelphia",
-    "atlanta":       "Atlanta",
-    "san_francisco": "San Francisco",
-    "minneapolis":   "Minneapolis",
-    "phoenix":       "Phoenix",
-    "houston":       "Houston",
+    "los_angeles":  "Los Angeles",
+    "chicago":      "Chicago",
+    "denver":       "Denver",
+    "dallas":       "Dallas",
+    "houston":      "Houston",
+    "las_vegas":    "Las Vegas",
+    "minneapolis":  "Minneapolis",
+    "new_orleans":  "New Orleans",
+    "philadelphia": "Philadelphia",
+    "san_antonio":  "San Antonio",
+    "washington_dc":"Washington DC",
 }
 
 # Month abbreviation mapping for ticker parsing
@@ -189,6 +187,9 @@ async def fetch_kalshi_weather_markets(
                         if hours_until_close > 48 or hours_until_close < 0:
                             continue
                         logger.info(f"{ticker} closes in {hours_until_close:.1f}h")
+
+                    if parsed["target_date"] != today:
+                        continue
 
                     candidates.append({
                         "ticker": ticker,

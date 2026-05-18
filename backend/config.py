@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     WEATHER_MIN_EDGE_THRESHOLD: float = 0.08  # 8% — weather has more signal than 5-min BTC
     WEATHER_MAX_ENTRY_PRICE: float = 0.97
     WEATHER_MAX_TRADE_SIZE: float = 15.0
-    WEATHER_CITIES: str = "nyc,chicago,miami,los_angeles,denver,philadelphia,san_francisco,minneapolis,phoenix,houston"
+    WEATHER_CITIES: str = "los_angeles,chicago,denver,dallas,houston,las_vegas,minneapolis,new_orleans,philadelphia,san_antonio,washington_dc"
 
     # Sizing
     INITIAL_BANKROLL: float = 80.0
