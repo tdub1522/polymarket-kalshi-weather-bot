@@ -258,6 +258,8 @@ async def scan_distribution_signals() -> List[dict]:
     logger.info(f"DISTRIBUTION SCAN COMPLETE: {len(signals)} signals")
 
     # Send to Discord
+    logger.info(f"Distribution webhook configured: {bool(settings.DISCORD_DISTRIBUTION_WEBHOOK_URL)}")
+    logger.info(f"Distribution webhook URL starts with: {str(settings.DISCORD_DISTRIBUTION_WEBHOOK_URL)[:50] if settings.DISCORD_DISTRIBUTION_WEBHOOK_URL else 'None'}")
     if settings.DISCORD_ENABLED and settings.DISCORD_DISTRIBUTION_WEBHOOK_URL:
         for signal in signals:
             await send_distribution_signal(signal)
