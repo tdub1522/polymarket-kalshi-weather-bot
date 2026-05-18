@@ -154,11 +154,26 @@ async def fetch_minutetemp_forecast(
 
         for model_id in qualified_model_ids:
             temps_dict = model_forecasts.get(model_id, {})
-            daily_temps = [
-                v for k, v in temps_dict.items()
-                if date_start_utc <= k <= date_end_utc
-                and v is not None
-            ]
+
+            from datetime import datetime, timezone as _tz
+            day_start = datetime(target_date.year, target_date.month, target_date.day,
+                                 0, 0, 0, tzinfo=_tz.utc)
+            day_end = day_start + timedelta(days=1, hours=12)
+
+            daily_temps = []
+            for k, v in temps_dict.items():
+                if v is None:
+                    continue
+                try:
+                    k_clean = k.replace('Z', '+00:00')
+                    dt = datetime.fromisoformat(k_clean)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=_tz.utc)
+                    dt_utc = dt.astimezone(_tz.utc)
+                    if day_start <= dt_utc <= day_end:
+                        daily_temps.append(v)
+                except Exception:
+                    continue
             if daily_temps:
                 logger.info(
                     f"  {model_id}: {len(temps_dict)} total hours, "
