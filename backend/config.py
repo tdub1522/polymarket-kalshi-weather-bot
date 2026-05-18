@@ -41,6 +41,7 @@ class Settings(BaseSettings):
 
     # Discord alerts
     DISCORD_WEBHOOK_URL: Optional[str] = None
+    DISCORD_DISTRIBUTION_WEBHOOK_URL: Optional[str] = None
     DISCORD_ENABLED: bool = False
 
     # ── KXBTC15M (Kalshi BTC 15-min) signal pipeline ─────────────────

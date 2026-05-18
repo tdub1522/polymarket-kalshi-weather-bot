@@ -93,3 +93,63 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
                 logger.warning("Discord webhook returned {}: {}", resp.status_code, resp.text[:100])
     except Exception as exc:
         logger.error("Discord notification failed: {}", exc)
+
+
+async def send_distribution_signal(signal: dict) -> None:
+    """Send distribution strategy signal to separate Discord channel."""
+    webhook_url = settings.DISCORD_DISTRIBUTION_WEBHOOK_URL
+    if not webhook_url:
+        return
+
+    ticker = signal.get("target_ticker", "")
+    now = datetime.now(timezone.utc)
+
+    if ticker in _recently_sent:
+        if now - _recently_sent[ticker] < timedelta(hours=1):
+            return
+    _recently_sent[ticker] = now
+
+    city = signal.get("city_name", "")
+    mean = signal.get("mean", 0)
+    std = signal.get("std", 0)
+    lower = signal.get("lower_bound", 0)
+    upper = signal.get("upper_bound", 0)
+    theory = signal.get("theoretical_prob", 0)
+    combined_yes = signal.get("combined_yes", 0)
+    edge = signal.get("edge", 0)
+    inside = signal.get("inside_brackets", [])
+    target_ticker = signal.get("target_ticker", "")
+    target_yes = signal.get("target_yes_price", 0)
+    target_no = signal.get("target_no_price", 0)
+    size = signal.get("suggested_size", 15)
+
+    embed = {
+        "title": f"DISTRIBUTION SIGNAL — {city}",
+        "color": 0x9B59B6,
+        "fields": [
+            {"name": "Target Contract",    "value": target_ticker,                          "inline": False},
+            {"name": "Side",               "value": "BUY NO",                               "inline": True},
+            {"name": "YES Price",          "value": f"{target_yes*100:.0f}¢",               "inline": True},
+            {"name": "NO Price",           "value": f"{target_no*100:.0f}¢",                "inline": True},
+            {"name": "MT Oracle Mean",     "value": f"{mean:.1f}°F",                        "inline": True},
+            {"name": "MT Oracle Std",      "value": f"±{std:.2f}°F",                        "inline": True},
+            {"name": "2σ Range",           "value": f"{lower:.1f}°F — {upper:.1f}°F",      "inline": True},
+            {"name": "Theory P(inside)",   "value": f"{theory*100:.1f}%",                   "inline": True},
+            {"name": "Market P(inside)",   "value": f"{combined_yes*100:.0f}¢",             "inline": True},
+            {"name": "Edge",               "value": f"+{edge*100:.1f}¢",                    "inline": True},
+            {"name": "Inside Brackets",    "value": "\n".join(inside) or "None",            "inline": False},
+            {"name": "Position Size",      "value": f"${size:.0f}",                         "inline": True},
+            {"name": "Models",             "value": f"{signal.get('num_members', 0)} MinuteTemp Oracle", "inline": True},
+        ],
+        "footer": {"text": "Manual trade required — bot does not auto-trade"},
+        "timestamp": signal.get("timestamp"),
+    }
+
+    payload = {"embeds": [embed]}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(webhook_url, json=payload)
+            logger.info(f"Distribution signal sent to Discord: {target_ticker}")
+    except Exception as exc:
+        logger.warning(f"Failed to send distribution signal to Discord: {exc}")

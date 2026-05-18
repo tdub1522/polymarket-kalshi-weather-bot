@@ -1142,6 +1142,13 @@ def get_forecast_history(city_key: str = None, target_date: str = None):
         db.close()
 
 
+@app.get("/api/distribution-signals")
+async def get_distribution_signals():
+    from backend.core.distribution_signals import scan_distribution_signals
+    signals = await scan_distribution_signals()
+    return {"signals": signals, "count": len(signals)}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

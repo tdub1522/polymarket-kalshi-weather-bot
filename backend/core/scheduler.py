@@ -192,8 +192,12 @@ async def weather_scan_and_trade_job():
 
     try:
         from backend.core.weather_signals import scan_for_weather_signals
+        from backend.core.distribution_signals import scan_distribution_signals
 
         signals = await scan_for_weather_signals()
+
+        # Run distribution scan alongside weather scan
+        await scan_distribution_signals()
         actionable = [s for s in signals if s.passes_threshold]
 
         log_event("data", f"Weather: {len(signals)} signals, {len(actionable)} actionable", {
