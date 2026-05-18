@@ -20,6 +20,12 @@ logger = logging.getLogger("trading_bot")
 
 BASE_URL = "https://api.minutetemp.com/api/v1"
 
+MODEL_ID_ALIASES = {
+    "ecmwf_ifs025": "ecmwf_ifs",
+    "ncep_gefs025": "ncep_gefs",
+    "gfs_global_025": "gfs_global",
+}
+
 CITY_STATION_MAP: Dict[str, dict] = {
     "nyc":          {"station_id": "KNYC", "slug": "nyc"},
     "chicago":      {"station_id": "KMDW", "slug": "chi"},
@@ -134,7 +140,10 @@ async def fetch_minutetemp_forecast(
             logger.warning(f"No qualifying models for {city_key} ({mode})")
             return None
 
-        qualified_model_ids = {s["model_id"] for s in qualified_models}
+        qualified_model_ids = {
+            MODEL_ID_ALIASES.get(s["model_id"], s["model_id"])
+            for s in qualified_models
+        }
         model_forecasts = await fetch_station_forecast(station_id)
 
         member_highs: List[float] = []
