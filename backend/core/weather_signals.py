@@ -311,6 +311,11 @@ async def scan_for_weather_signals() -> List[WeatherTradingSignal]:
         except Exception as e:
             logger.error(f"Failed to fetch Kalshi weather markets: {e}")
 
+    from datetime import date
+    today = date.today()
+    markets = [m for m in markets if m.target_date == today]
+    logger.info(f"Today-only filter ({today}): {len(markets)} markets remaining")
+
     logger.info(f"Found {len(markets)} total weather temperature markets")
 
     # Pre-fetch ensemble forecasts keyed by (city_key, target_date)
