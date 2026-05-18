@@ -26,7 +26,11 @@ CITY_STATION_MAP: Dict[str, dict] = {
     "miami":        {"station_id": "KMIA", "slug": "mia"},
     "los_angeles":  {"station_id": "KLAX", "slug": "lax"},
     "denver":       {"station_id": "KDEN", "slug": "den"},
-    "philadelphia": {"station_id": "KPHL", "slug": "phl"},
+    "philadelphia":  {"station_id": "KPHL", "slug": "phl"},
+    "san_francisco": {"station_id": "KSFO", "slug": "sfo"},
+    "minneapolis":   {"station_id": "KMSP", "slug": "msp"},
+    "phoenix":       {"station_id": "KPHX", "slug": "phx"},
+    "houston":       {"station_id": "KHOU", "slug": "hou"},
 }
 
 _API_HEADERS = lambda: {"X-API-Key": settings.MINUTETEMP_API_KEY or ""}

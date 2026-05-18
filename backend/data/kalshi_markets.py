@@ -13,25 +13,33 @@ logger = logging.getLogger("trading_bot")
 
 # Kalshi series tickers for high-temperature markets by city
 CITY_SERIES: Dict[str, str] = {
-    "nyc": "KXHIGHNY",
-    "chicago": "KXHIGHCHI",
-    "miami": "KXHIGHMIA",
-    "los_angeles": "KXHIGHLAX",
-    "denver": "KXHIGHDEN",
-    "boston": "KXHIGHBOS",
-    "philadelphia": "KXHIGHPHIL",
-    "atlanta": "KXHIGHATL",
+    "nyc":           "KXHIGHNY",
+    "chicago":       "KXHIGHCHI",
+    "miami":         "KXHIGHMIA",
+    "los_angeles":   "KXHIGHLAX",
+    "denver":        "KXHIGHDEN",
+    "boston":        "KXHIGHBOS",
+    "philadelphia":  "KXHIGHPHIL",
+    "atlanta":       "KXHIGHATL",
+    "san_francisco": "KXHIGHTSFO",
+    "minneapolis":   "KXHIGHTMIN",
+    "phoenix":       "KXHIGHTPHX",
+    "houston":       "KXHIGHTHOU",
 }
 
 CITY_NAMES: Dict[str, str] = {
-    "nyc": "New York",
-    "chicago": "Chicago",
-    "miami": "Miami",
-    "los_angeles": "Los Angeles",
-    "denver": "Denver",
-    "boston": "Boston",
-    "philadelphia": "Philadelphia",
-    "atlanta": "Atlanta",
+    "nyc":           "New York",
+    "chicago":       "Chicago",
+    "miami":         "Miami",
+    "los_angeles":   "Los Angeles",
+    "denver":        "Denver",
+    "boston":        "Boston",
+    "philadelphia":  "Philadelphia",
+    "atlanta":       "Atlanta",
+    "san_francisco": "San Francisco",
+    "minneapolis":   "Minneapolis",
+    "phoenix":       "Phoenix",
+    "houston":       "Houston",
 }
 
 # Month abbreviation mapping for ticker parsing

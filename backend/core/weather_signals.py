@@ -34,16 +34,6 @@ HISTORICAL_WIN_RATES = {
 }
 
 
-CITY_PREDICTABILITY = {
-    "miami":        {"rank": 1, "mae": 1.44, "score": 1.00},
-    "denver":       {"rank": 2, "mae": 1.57, "score": 0.95},
-    "chicago":      {"rank": 3, "mae": 1.74, "score": 0.90},
-    "los_angeles":  {"rank": 4, "mae": 1.96, "score": 0.85},
-    "philadelphia": {"rank": 5, "mae": 1.98, "score": 0.84},
-    "nyc":          {"rank": 6, "mae": 2.21, "score": 0.75},
-}
-
-
 def get_historical_win_rate(signal_type: str, no_price: float) -> float:
     no_price_cents = round(no_price * 100)
     buckets = HISTORICAL_WIN_RATES.get(signal_type, {})
@@ -59,7 +49,6 @@ def calculate_position_size(
     gfs_distance: float,
     yes_price: float,
     bankroll: float = 80.0,
-    city_key: str = "",
 ) -> float:
     win_rate_score = historical_win_rate
     ev_score = min(expected_value / 0.30, 1.0)
@@ -77,9 +66,6 @@ def calculate_position_size(
     min_position = 10.0
 
     position_size = min_position + (confidence * (max_position - min_position))
-
-    city_score = CITY_PREDICTABILITY.get(city_key, {}).get("score", 0.85)
-    position_size = position_size * city_score
 
     return round(position_size)
 
@@ -220,7 +206,6 @@ async def generate_weather_signal(
         gfs_distance=abs(edge_f),
         yes_price=market.yes_price,
         bankroll=bankroll,
-        city_key=market.city_key,
     )
 
     signal = WeatherTradingSignal(

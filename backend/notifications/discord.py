@@ -9,15 +9,6 @@ logger = logging.getLogger("trading_bot")
 
 from backend.config import settings
 
-CITY_PREDICTABILITY = {
-    "miami":        {"rank": 1, "mae": 1.44},
-    "denver":       {"rank": 2, "mae": 1.57},
-    "chicago":      {"rank": 3, "mae": 1.74},
-    "los_angeles":  {"rank": 4, "mae": 1.96},
-    "philadelphia": {"rank": 5, "mae": 1.98},
-    "nyc":          {"rank": 6, "mae": 2.21},
-}
-
 _recently_sent: dict[str, datetime] = {}
 
 
@@ -78,11 +69,6 @@ async def send_discord_signal(signal: dict[str, Any]) -> None:
         {"name": "MT Oracle Std",        "value": f"±{ensemble_std:.1f}°F",                                                       "inline": True},
         {"name": "MT Oracle Distance",   "value": mt_distance_label,                                                               "inline": True},
     ]
-
-    city_pred = CITY_PREDICTABILITY.get(signal.get("city_key", ""), {})
-    rank = city_pred.get("rank", "?")
-    mae = city_pred.get("mae", 0)
-    fields.append({"name": "City Rank", "value": f"#{rank} (MAE {mae}°F)", "inline": True})
 
     embed = {
         "title": signal.get("market_title", "Unknown Market"),

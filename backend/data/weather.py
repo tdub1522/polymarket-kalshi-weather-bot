@@ -67,6 +67,34 @@ CITY_CONFIG: Dict[str, dict] = {
         "station": "KATL",
         "location": "Hartsfield-Jackson Atlanta International Airport",
     },
+    "san_francisco": {
+        "lat": 37.6196,
+        "lon": -122.3656,
+        "name": "San Francisco",
+        "station": "KSFO",
+        "location": "San Francisco International Airport",
+    },
+    "minneapolis": {
+        "lat": 44.8831,
+        "lon": -93.2289,
+        "name": "Minneapolis",
+        "station": "KMSP",
+        "location": "Minneapolis-St. Paul International Airport",
+    },
+    "phoenix": {
+        "lat": 33.4278,
+        "lon": -112.0035,
+        "name": "Phoenix",
+        "station": "KPHX",
+        "location": "Phoenix Sky Harbor International Airport",
+    },
+    "houston": {
+        "lat": 29.6375,
+        "lon": -95.2825,
+        "name": "Houston",
+        "station": "KHOU",
+        "location": "Houston Hobby Airport",
+    },
 }
 
 
