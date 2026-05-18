@@ -13,7 +13,7 @@ logger = logging.getLogger("trading_bot")
 
 MAX_STD = 1.5           # Maximum std allowed for signal generation
 MAX_COMBINED_YES = 0.90 # Maximum combined YES price for inside brackets
-MAX_OUTSIDE_YES = 0.15  # Maximum YES price for outside contracts (NO >= 85c)
+MAX_OUTSIDE_YES = 0.05  # Maximum YES price for outside contracts (NO >= 95c)
 SIGMA_MULTIPLIER = 2.0  # Number of standard deviations for range
 
 
